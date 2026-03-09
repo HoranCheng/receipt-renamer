@@ -4,9 +4,9 @@
 移动端优先的 Web App，帮助用户自动处理 Google Drive 中的收据：AI 识别 → 智能命名 → 归档 → Sheets 同步。
 
 ## 当前状态
-- **阶段**: MVP 原型已完成（单文件 React 组件），需要拆分为正式项目结构
+- **阶段**: v0.1.0 — 已从原型拆分为模块化结构，工程化配置完成
 - **可工作功能**: Google OAuth 登录、Drive 文件读取/重命名/移动、AI 识别（Claude API）、Sheets 同步、拍照扫描、批量处理
-- **原型文件**: `src/app-prototype.jsx`（这是在 Claude.ai artifacts 中开发的完整单文件版本）
+- **架构**: 模块化 React 组件 + 服务层，含 ESLint/Prettier、Vitest 测试、ErrorBoundary
 
 ## 技术栈
 - **前端**: React 18 + Vite，纯 CSS-in-JS（无框架），移动端优先
@@ -58,10 +58,14 @@ npm run build        # 生产构建
 ## 下一步开发计划（按优先级）
 
 ### P0 — 项目工程化
-- [ ] 从 `src/app-prototype.jsx` 拆分为模块化结构
-- [ ] 配置 Vite + React
-- [ ] 环境变量管理（.env）
-- [ ] 添加 ESLint + Prettier
+- [x] 从 `src/app-prototype.jsx` 拆分为模块化结构
+- [x] 配置 Vite + React
+- [x] 环境变量管理（.env）
+- [x] 添加 ESLint + Prettier
+- [x] ErrorBoundary 错误边界
+- [x] AI 服务 CORS 代理 + 认证头修复
+- [x] Vitest 单元测试
+- [x] PWA manifest + service worker
 
 ### P1 — 核心功能完善
 - [ ] Google OAuth token 自动刷新（当前 token 过期后需重新授权）
