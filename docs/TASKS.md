@@ -1,62 +1,75 @@
 # TASKS.md — Receipt Renamer
 
 ## Project Status: ACTIVE
-## Version Target: v0.1.0
+## Current Sprint: v0.2.0
 
 ---
 
-## Task Board
+## Completed (v0.1.0)
 
-### T-001 — Fix AI service (CORS + auth headers)
-- **Priority**: P0
-- **Status**: Open
-- **Assigned**: Worker-Claude
-- **Description**: `src/services/ai.js` is missing `x-api-key` and `anthropic-version` headers. Also, direct browser calls to `api.anthropic.com` will fail due to CORS. Add a configurable proxy mode: user can set `VITE_AI_PROXY_URL` for production, or use direct API key (dev only). Add proper error handling for API failures.
-- **Acceptance**: AI service works with both proxy mode and direct API key mode; errors are caught and surfaced to the user.
+| ID | Task | Worker | Status |
+|----|------|--------|--------|
+| T-001 | Fix AI service (CORS + auth headers) | Tech Lead | ✅ Done |
+| T-002 | ESLint + Prettier + cleanup | Tech Lead | ✅ Done |
+| T-003 | Vitest + core tests | Tech Lead | ✅ Done |
+| T-004 | UI polish + ErrorBoundary | Tech Lead | ✅ Done |
+| T-005 | README + docs + LICENSE | Tech Lead | ✅ Done |
+| T-006 | PWA manifest + meta tags | Tech Lead | ✅ Done |
 
-### T-002 — Add ESLint + Prettier + code quality
-- **Priority**: P0
-- **Status**: Open
-- **Assigned**: Worker-Claude
-- **Description**: Add ESLint (flat config) + Prettier. Add lint script to package.json. Fix any lint errors. Remove `src/app-prototype.jsx` (already migrated). Remove stale `dist/` from tracking.
-- **Acceptance**: `npm run lint` passes with 0 errors. Prototype file removed. Code formatted consistently.
+---
 
-### T-003 — Complete missing views + UI polish
-- **Priority**: P0
-- **Status**: Open
-- **Assigned**: Worker-GPT
-- **Description**: Review `ConfigView.jsx` and `LogView.jsx` — they appear incomplete (short files). Ensure all views are fully functional. Check: ConfigView should show/edit all settings, support reconnect and reset. LogView should show full receipt history with delete and detail view. Add proper loading states and error boundaries.
-- **Acceptance**: All 6 views render correctly, handle edge cases (empty state, error state, loading state).
+## v0.2.0 Sprint — Active Tasks
 
-### T-004 — Add Vitest + core tests
+### T-007 — Google OAuth token auto-refresh
 - **Priority**: P1
-- **Status**: Open
-- **Assigned**: Worker-Claude
-- **Description**: Add Vitest + testing-library. Write unit tests for: constants (categories, config defaults), storage service (store/load), AI service (mock fetch, test JSON parsing, error handling). Write component smoke tests for App, Nav, Btn.
-- **Acceptance**: `npm test` runs, ≥80% coverage on services/, all tests green.
+- **Status**: Open → Assigned Worker-Claude
+- **Description**: Current flow requires re-auth when token expires. Implement silent token refresh using Google Identity Services. When `gapi.client` returns 401, auto-call `requestAccessToken()` with `prompt: ''` (no consent prompt) to get a fresh token. Add a wrapper function `withAuth(fn)` that retries on auth failure.
+- **Acceptance**: User doesn't see re-auth prompts during a session unless initial consent is needed.
 
-### T-005 — README + deployment docs
+### T-008 — Drive file pagination
 - **Priority**: P1
-- **Status**: Open
-- **Assigned**: Worker-GPT
-- **Description**: Rewrite README.md with: project description, screenshots placeholder, setup guide (Google Cloud Console step-by-step), environment variables, deployment guide (Vercel/Netlify), architecture diagram (text). Update CLAUDE.md to reflect current state.
-- **Acceptance**: README is comprehensive and beginner-friendly. CLAUDE.md reflects actual project state.
+- **Status**: Open → Assigned Worker-Claude
+- **Description**: Current `listFilesInFolder()` is capped at 50 files. Implement cursor-based pagination using `pageToken`. Add "Load More" button in InboxView. Store the nextPageToken and append results.
+- **Acceptance**: Users with >50 files in inbox can load all files. UI shows load-more affordance.
 
-### T-006 — PWA basics + manifest
+### T-009 — Receipt detail/edit page
+- **Priority**: P1
+- **Status**: Open → Assigned Worker-GPT
+- **Description**: Add a detail view when tapping a receipt in LogView. Show: original filename, new filename, all extracted fields (editable), confidence score, file link to Drive, timestamp. Allow re-categorize and save changes to localStorage. Add "Open in Drive" button.
+- **Acceptance**: Tapping a receipt row opens detail view. All fields editable. Changes persist.
+
+### T-010 — Batch error recovery + retry
+- **Priority**: P1
+- **Status**: Open → Assigned Worker-GPT
+- **Description**: Current batch processing stops on error. Implement: skip failed files and continue, show error count at end, add "Retry Failed" button that only re-processes failed files. Track failed file IDs in state.
+- **Acceptance**: Batch process continues past errors. User can retry only failed files.
+
+### T-011 — PDF file support
+- **Priority**: P1
+- **Status**: Open → Assigned Worker-Claude
+- **Description**: Current app only handles images. For PDF files from Drive: detect `mimeType === 'application/pdf'`, use Claude's native PDF support (send as `document` type with `source.media_type: "application/pdf"`). Update `analyzeReceipt()` to handle both image and PDF content types.
+- **Acceptance**: PDF receipts from Drive inbox are processed correctly by AI.
+
+### T-012 — Export CSV + data backup
 - **Priority**: P2
-- **Status**: Open
-- **Assigned**: Worker-GPT
-- **Description**: Add PWA manifest, service worker for offline shell caching, meta tags for mobile (viewport, theme-color, apple-mobile-web-app-capable). Add app icons placeholder.
-- **Acceptance**: App is installable on mobile via "Add to Home Screen". Offline shell loads.
+- **Status**: Open → Assigned Worker-GPT
+- **Description**: Add export button in LogView header. Generate CSV with columns: Date, Merchant, Category, Amount, Currency, Confidence, Original Filename, New Filename, Processed At. Use `Blob` + `URL.createObjectURL` for download. Also add JSON export for full data backup.
+- **Acceptance**: User can download CSV and JSON of all receipt records.
 
 ---
 
-## Escalation Policy
-- L1 (30m no heartbeat): ping worker
+## Escalation Policy (improved from v0.1)
+- L1 (30m no heartbeat): ping worker — max 1 alert per task
 - L2 (60m): Tech Lead re-splits or reassigns
 - L3 (120m): notify owner, scope downgrade
-- **Ack mechanism**: Once Tech Lead confirms a stale task is handled, mark `acknowledged: true` in heartbeat to stop repeat alerts.
-- **Role rule**: If Tech Lead executes a task directly, that task is exempt from auto-alerts.
+- **Dedup rule**: Same alert for same task → max 3 times in 24h
+- **Ack mechanism**: Tech Lead confirms stale → alert stops
+- **Self-execute exemption**: Tasks done by Tech Lead directly skip auto-alerts
 
 ## Done Sync Rule
-When a task moves to Done, the worker MUST also clear its heartbeat entry. No orphan heartbeats.
+When task → Done, worker MUST also update this file. No orphan statuses.
+
+## Standup Rules
+- Post to `receipt-tasks-board` only when status CHANGES
+- Max 3 standups per day
+- Incremental format: only list what changed since last standup
