@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { T, FM } from '../constants/theme';
-import { CATEGORIES, CAT_ICON, CAT_CLR } from '../constants';
+import { CAT_ICON, CAT_CLR } from '../constants';
 import Header from '../components/Header';
 import Field from '../components/Field';
 import Btn from '../components/Btn';

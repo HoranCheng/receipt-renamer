@@ -2,7 +2,49 @@ import { useState } from 'react';
 import { T, F } from '../constants/theme';
 import { CAT_ICON, CAT_CLR } from '../constants';
 import Header from '../components/Header';
+import Btn from '../components/Btn';
 import ReceiptRow from '../components/ReceiptRow';
+
+function downloadFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportCSV(receipts) {
+  const header =
+    'Date,Merchant,Category,Amount,Currency,Confidence,Original Filename,New Filename,Processed At';
+  const rows = receipts.map((r) =>
+    [
+      r.date || '',
+      `"${(r.merchant || '').replace(/"/g, '""')}"`,
+      r.category || '',
+      r.amount || 0,
+      r.currency || 'AUD',
+      r.confidence || 0,
+      `"${(r.originalName || '').replace(/"/g, '""')}"`,
+      `"${(r.newName || '').replace(/"/g, '""')}"`,
+      r.createdAt || '',
+    ].join(',')
+  );
+  downloadFile(
+    [header, ...rows].join('\n'),
+    `receipts_${new Date().toISOString().slice(0, 10)}.csv`,
+    'text/csv'
+  );
+}
+
+function exportJSON(receipts) {
+  downloadFile(
+    JSON.stringify(receipts, null, 2),
+    `receipts_backup_${new Date().toISOString().slice(0, 10)}.json`,
+    'application/json'
+  );
+}
 
 export default function LogView({ receipts, onDelete, onDetail }) {
   const [filter, setFilter] = useState('all');
@@ -21,6 +63,19 @@ export default function LogView({ receipts, onDelete, onDetail }) {
         title={'\u5168\u90E8\u8BB0\u5F55'}
         sub={`\u5171 ${receipts.length} \u6761`}
       />
+
+      {/* Export buttons */}
+      {receipts.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <Btn small onClick={() => exportCSV(receipts)} style={{ flex: 1 }}>
+            📊 导出 CSV
+          </Btn>
+          <Btn small onClick={() => exportJSON(receipts)} style={{ flex: 1 }}>
+            💾 导出 JSON
+          </Btn>
+        </div>
+      )}
+
       <div style={{ position: 'relative', marginBottom: 10 }}>
         <input
           placeholder={'\u641C\u7D22\u5546\u6237...'}
