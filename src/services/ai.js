@@ -4,7 +4,7 @@ const API_BASE =
   import.meta.env.VITE_AI_PROXY_URL || 'https://api.anthropic.com';
 const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || '';
 
-export async function analyzeReceipt(base64, mediaType) {
+export async function analyzeReceipt(base64, mediaType, fileType = 'image') {
   const prompt = `You are a receipt data extractor for an Australian user. Analyze this receipt and extract structured data.
 
 RULES:
@@ -39,10 +39,23 @@ Respond ONLY with this JSON, no markdown, no backticks:
         {
           role: 'user',
           content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: mediaType, data: base64 },
-            },
+            fileType === 'pdf' || mediaType === 'application/pdf'
+              ? {
+                  type: 'document',
+                  source: {
+                    type: 'base64',
+                    media_type: 'application/pdf',
+                    data: base64,
+                  },
+                }
+              : {
+                  type: 'image',
+                  source: {
+                    type: 'base64',
+                    media_type: mediaType,
+                    data: base64,
+                  },
+                },
             { type: 'text', text: prompt },
           ],
         },

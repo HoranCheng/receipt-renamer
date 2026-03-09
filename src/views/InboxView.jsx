@@ -75,7 +75,8 @@ export default function InboxView({ config, onProcessed }) {
         : file.mimeType.includes('png')
           ? 'image/png'
           : 'image/jpeg';
-      const data = await analyzeReceipt(base64, mt);
+      const isPdf = file.mimeType.includes('pdf');
+      const data = await analyzeReceipt(base64, mt, isPdf ? 'pdf' : 'image');
 
       const ext = file.name.split('.').pop();
       const newName = `${data.date || 'unknown'} ${data.category || 'Other'} ${data.merchant || 'Unknown'}.${ext}`;
