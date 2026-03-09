@@ -4,7 +4,7 @@ import { CAT_ICON, CAT_CLR } from '../constants';
 import Header from '../components/Header';
 import ReceiptRow from '../components/ReceiptRow';
 
-export default function LogView({ receipts, onDelete }) {
+export default function LogView({ receipts, onDelete, onDetail }) {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const filtered = receipts.filter((r) => {
@@ -114,7 +114,11 @@ export default function LogView({ receipts, onDelete }) {
           </div>
         ) : (
           filtered.map((r) => (
-            <div key={r.id} style={{ position: 'relative' }}>
+            <div
+              key={r.id}
+              style={{ position: 'relative', cursor: 'pointer' }}
+              onClick={() => onDetail && onDetail(r)}
+            >
               <ReceiptRow r={r} />
               <button
                 onClick={() => onDelete(r.id)}

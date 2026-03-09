@@ -16,12 +16,14 @@ import InboxView from './views/InboxView';
 import ScanView from './views/ScanView';
 import LogView from './views/LogView';
 import ConfigView from './views/ConfigView';
+import DetailView from './views/DetailView';
 
 export default function App() {
   const [view, setView] = useState('dash');
   const [config, setConfig] = useState(DEFAULT_CONFIG);
   const [receipts, setReceipts] = useState([]);
   const [ready, setReady] = useState(false);
+  const [detailReceipt, setDetailReceipt] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -55,6 +57,15 @@ export default function App() {
     const updated = receipts.filter((r) => r.id !== id);
     setReceipts(updated);
     await store('rr-receipts', updated);
+  };
+
+  const updateReceipt = async (updatedReceipt) => {
+    const updated = receipts.map((r) =>
+      r.id === updatedReceipt.id ? updatedReceipt : r
+    );
+    setReceipts(updated);
+    await store('rr-receipts', updated);
+    setDetailReceipt(null);
   };
 
   const handleSetupComplete = async (c) => {
@@ -159,8 +170,19 @@ export default function App() {
             }}
           />
         )}
-        {view === 'log' && (
-          <LogView receipts={receipts} onDelete={deleteReceipt} />
+        {view === 'log' && !detailReceipt && (
+          <LogView
+            receipts={receipts}
+            onDelete={deleteReceipt}
+            onDetail={(r) => setDetailReceipt(r)}
+          />
+        )}
+        {view === 'log' && detailReceipt && (
+          <DetailView
+            receipt={detailReceipt}
+            onSave={updateReceipt}
+            onBack={() => setDetailReceipt(null)}
+          />
         )}
         {view === 'cfg' && (
           <ConfigView
