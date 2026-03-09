@@ -1,6 +1,7 @@
 import { CATEGORIES } from '../constants';
 
-const API_BASE = import.meta.env.VITE_AI_PROXY_URL || 'https://api.anthropic.com';
+const API_BASE =
+  import.meta.env.VITE_AI_PROXY_URL || 'https://api.anthropic.com';
 const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || '';
 
 export async function analyzeReceipt(base64, mediaType) {
@@ -51,16 +52,14 @@ Respond ONLY with this JSON, no markdown, no backticks:
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
-    let detail = '';
+    let detail = errBody;
     try {
       const parsed = JSON.parse(errBody);
       detail = parsed.error?.message || errBody;
-    } catch {
-      detail = errBody;
+    } catch (_e) {
+      // Use raw error body
     }
-    throw new Error(
-      `AI 识别失败 (${res.status}): ${detail || res.statusText}`
-    );
+    throw new Error(`AI 识别失败 (${res.status}): ${detail || res.statusText}`);
   }
 
   const data = await res.json();
