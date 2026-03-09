@@ -18,6 +18,8 @@ export default function InboxView({ config, onProcessed }) {
   const [results, setResults] = useState({});
   const [batchMode, setBatchMode] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
+  const [nextPageToken, setNextPageToken] = useState(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const inboxIdRef = useRef(null);
   const validIdRef = useRef(null);
   const reviewIdRef = useRef(null);
@@ -35,12 +37,29 @@ export default function InboxView({ config, onProcessed }) {
       reviewIdRef.current = await findOrCreateFolder(
         config.reviewFolder || '20_review_needed'
       );
-      const fs = await listFilesInFolder(inboxId);
-      setFiles(fs);
+      const result = await listFilesInFolder(inboxId);
+      setFiles(result.files);
+      setNextPageToken(result.nextPageToken);
     } catch (e) {
       alert('\u52A0\u8F7D\u5931\u8D25\uFF1A' + e.message);
     }
     setLoading(false);
+  };
+
+  const loadMore = async () => {
+    if (!nextPageToken || !inboxIdRef.current) return;
+    setLoadingMore(true);
+    try {
+      const result = await listFilesInFolder(
+        inboxIdRef.current,
+        nextPageToken
+      );
+      setFiles((prev) => [...prev, ...result.files]);
+      setNextPageToken(result.nextPageToken);
+    } catch (e) {
+      console.warn('Load more failed:', e);
+    }
+    setLoadingMore(false);
   };
 
   useEffect(() => {
@@ -397,6 +416,18 @@ export default function InboxView({ config, onProcessed }) {
               </div>
             );
           })}
+
+          {/* Load More button */}
+          {nextPageToken && (
+            <Btn
+              small
+              onClick={loadMore}
+              disabled={loadingMore}
+              style={{ width: '100%', marginTop: 10 }}
+            >
+              {loadingMore ? '加载中...' : '📥 加载更多'}
+            </Btn>
+          )}
         </div>
       )}
     </div>
