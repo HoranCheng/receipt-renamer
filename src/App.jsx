@@ -5,6 +5,7 @@ import { initGoogleAPI, isGapiLoaded, requestAccessToken } from './services/goog
 import { store, load } from './services/storage';
 import { css } from './styles';
 import Nav from './components/Nav';
+import ErrorBoundary from './components/ErrorBoundary';
 import SetupView from './views/SetupView';
 import DashView from './views/DashView';
 import InboxView from './views/InboxView';
@@ -96,18 +97,20 @@ export default function App() {
   }
 
   return (
-    <div style={{minHeight:"100vh",background:T.bg,fontFamily:F,color:T.tx,
-      maxWidth:520,margin:"0 auto",WebkitFontSmoothing:"antialiased"}}>
-      <style>{css}</style>
+    <ErrorBoundary>
+      <div style={{minHeight:"100vh",background:T.bg,fontFamily:F,color:T.tx,
+        maxWidth:520,margin:"0 auto",WebkitFontSmoothing:"antialiased"}}>
+        <style>{css}</style>
 
-      {view === "dash" && <DashView receipts={receipts} onNav={setView}/>}
-      {view === "inbox" && <InboxView config={config} onProcessed={addReceipt}/>}
-      {view === "scan" && <ScanView config={config} onComplete={r => { addReceipt(r); setView("dash"); }}/>}
-      {view === "log" && <LogView receipts={receipts} onDelete={deleteReceipt}/>}
-      {view === "cfg" && <ConfigView config={config} setConfig={setConfig}
-        onSave={saveConfig} onReconnect={handleReconnect} onReset={handleReset}/>}
+        {view === "dash" && <DashView receipts={receipts} onNav={setView}/>}
+        {view === "inbox" && <InboxView config={config} onProcessed={addReceipt}/>}
+        {view === "scan" && <ScanView config={config} onComplete={r => { addReceipt(r); setView("dash"); }}/>}
+        {view === "log" && <LogView receipts={receipts} onDelete={deleteReceipt}/>}
+        {view === "cfg" && <ConfigView config={config} setConfig={setConfig}
+          onSave={saveConfig} onReconnect={handleReconnect} onReset={handleReset}/>}
 
-      <Nav view={view} set={setView}/>
-    </div>
+        <Nav view={view} set={setView}/>
+      </div>
+    </ErrorBoundary>
   );
 }

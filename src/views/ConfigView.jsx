@@ -54,7 +54,7 @@ export default function ConfigView({ config, setConfig, onSave, onReconnect, onR
           {"4. \u9AD8\u7F6E\u4FE1 \u2192 \u5DF2\u9A8C\u8BC1\u6587\u4EF6\u5939 / \u4F4E\u7F6E\u4FE1 \u2192 \u5F85\u5BA1\u6838"}<br/>
           {"5. \u5143\u6570\u636E\u540C\u6B65\u5230 Google Sheets\uFF08\u53EF\u9009\uFF09"}<br/>
           <br/>
-          <strong style={{color:T.tx2}}>{"AI \u5F15\u64CE\uFF1A"}</strong>{"Claude Sonnet\uFF08\u5185\u7F6E\uFF0C\u65E0\u9700 API Key\uFF09"}<br/>
+          <strong style={{color:T.tx2}}>{"AI \u5F15\u64CE\uFF1A"}</strong>{"Claude Sonnet\uFF08\u9700\u5728 .env \u4E2D\u914D\u7F6E Anthropic API Key \u6216\u4EE3\u7406 URL\uFF09"}<br/>
           <strong style={{color:T.tx2}}>{"\u6570\u636E\u5B89\u5168\uFF1A"}</strong>{"\u6240\u6709\u6570\u636E\u5B58\u5728\u60A8\u81EA\u5DF1\u7684 Google \u8D26\u53F7\u4E2D"}
         </div>
       </div>
