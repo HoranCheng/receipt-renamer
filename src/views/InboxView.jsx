@@ -117,18 +117,42 @@ export default function InboxView({ config, onProcessed }) {
     }
   };
 
-  const batchProcess = async () => {
-    const unprocessed = files.filter((f) => !results[f.id]);
+  const batchProcess = async (filesToProcess) => {
+    const targets = filesToProcess || files.filter((f) => !results[f.id]);
     setBatchMode(true);
-    setBatchProgress({ current: 0, total: unprocessed.length });
-    for (let i = 0; i < unprocessed.length; i++) {
-      setBatchProgress({ current: i + 1, total: unprocessed.length });
-      await processFile(unprocessed[i]);
-      if (i < unprocessed.length - 1)
+    setBatchProgress({ current: 0, total: targets.length, failed: 0 });
+    let failCount = 0;
+    for (let i = 0; i < targets.length; i++) {
+      setBatchProgress({
+        current: i + 1,
+        total: targets.length,
+        failed: failCount,
+      });
+      const result = await processFile(targets[i]);
+      if (!result) failCount++;
+      if (i < targets.length - 1)
         await new Promise((r) => setTimeout(r, 1500));
     }
+    setBatchProgress((prev) => ({ ...prev, failed: failCount }));
     setBatchMode(false);
   };
+
+  const retryFailed = () => {
+    const failedFiles = files.filter(
+      (f) => results[f.id]?.status === 'error'
+    );
+    // Clear previous error results for these files
+    setResults((prev) => {
+      const next = { ...prev };
+      failedFiles.forEach((f) => delete next[f.id]);
+      return next;
+    });
+    batchProcess(failedFiles);
+  };
+
+  const failedCount = Object.values(results).filter(
+    (r) => r.status === 'error'
+  ).length;
 
   if (!config.connected) {
     return (
@@ -153,12 +177,29 @@ export default function InboxView({ config, onProcessed }) {
           {'\u{1F504} \u5237\u65B0'}
         </Btn>
         {files.length > 0 && !batchMode && (
-          <Btn small primary onClick={batchProcess} style={{ flex: 2 }}>
+          <Btn
+            small
+            primary
+            onClick={() => batchProcess()}
+            style={{ flex: 2 }}
+          >
             {'\u26A1 \u4E00\u952E\u5168\u90E8\u5904\u7406'} (
             {files.filter((f) => !results[f.id]).length})
           </Btn>
         )}
       </div>
+
+      {/* Retry failed button */}
+      {!batchMode && failedCount > 0 && (
+        <Btn
+          small
+          danger
+          onClick={retryFailed}
+          style={{ width: '100%', marginBottom: 14 }}
+        >
+          🔄 重试失败项 ({failedCount})
+        </Btn>
+      )}
 
       {batchMode && (
         <div
@@ -189,6 +230,11 @@ export default function InboxView({ config, onProcessed }) {
               }}
             >
               {batchProgress.current}/{batchProgress.total}
+              {batchProgress.failed > 0 && (
+                <span style={{ color: T.red, marginLeft: 6 }}>
+                  ({batchProgress.failed} 失败)
+                </span>
+              )}
             </span>
           </div>
           <div
