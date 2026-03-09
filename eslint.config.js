@@ -28,6 +28,7 @@ export default [
         URL: 'readonly',
         Response: 'readonly',
         Request: 'readonly',
+        Storage: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         setInterval: 'readonly',

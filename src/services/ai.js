@@ -56,7 +56,7 @@ Respond ONLY with this JSON, no markdown, no backticks:
     try {
       const parsed = JSON.parse(errBody);
       detail = parsed.error?.message || errBody;
-    } catch (_e) {
+    } catch {
       // Use raw error body
     }
     throw new Error(`AI 识别失败 (${res.status}): ${detail || res.statusText}`);

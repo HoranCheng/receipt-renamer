@@ -33,8 +33,8 @@ export default function App() {
       if (c.clientId && c.setupDone) {
         try {
           await initGoogleAPI(c.clientId);
-        } catch (_e) {
-          // Google API init may fail silently on first load
+        } catch {
+          console.warn('Google API init skipped on startup');
         }
       }
     })();

@@ -1,8 +1,8 @@
 export async function store(key, val) {
   try {
     localStorage.setItem(key, JSON.stringify(val));
-  } catch (_e) {
-    // localStorage may be full or unavailable
+  } catch {
+    console.warn('localStorage.setItem failed');
   }
 }
 
@@ -10,7 +10,7 @@ export async function load(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : fallback;
-  } catch (_e) {
+  } catch {
     return fallback;
   }
 }
