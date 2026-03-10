@@ -356,6 +356,83 @@ export default function ConfigView({
         )}
       </Section>
 
+      {/* Backup Settings — T-021 experimental */}
+      <Section title="💾 数据备份">
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
+        }}>
+          <span style={{
+            fontSize: 9, fontWeight: 800, letterSpacing: '0.5px',
+            background: 'rgba(250,204,21,0.15)', color: T.acc,
+            padding: '3px 8px', borderRadius: 6, border: `1px solid rgba(250,204,21,0.25)`,
+          }}>实验性</span>
+          <span style={{ fontSize: 11, color: T.tx3 }}>功能开发中，敬请期待</span>
+        </div>
+
+        <div style={{ fontSize: 12, color: T.tx2, marginBottom: 14, lineHeight: 1.7 }}>
+          为你的小票数据创建自动备份，防止误删或数据丢失。
+        </div>
+
+        {/* Backup options */}
+        {[
+          {
+            id: 'drive',
+            icon: '☁️',
+            label: 'Drive 内备份',
+            desc: '自动复制一份到 Drive 的 Receipt Backup 文件夹',
+            tag: '推荐',
+          },
+          {
+            id: 'local',
+            icon: '💻',
+            label: '本地文件夹',
+            desc: '自动保存到你选择的本地文件夹（仅 Chrome 支持）',
+            tag: null,
+          },
+        ].map(opt => {
+          const selected = (config.backupMode || []).includes(opt.id);
+          return (
+            <div
+              key={opt.id}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '12px', marginBottom: 8,
+                background: T.sf2, borderRadius: 12,
+                border: `1px solid ${T.bdr}`,
+                opacity: 0.55, cursor: 'not-allowed',
+              }}
+            >
+              <span style={{ fontSize: 22, flexShrink: 0 }}>{opt.icon}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: T.tx }}>{opt.label}</span>
+                  {opt.tag && (
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, color: T.grn,
+                      background: 'rgba(34,197,94,0.1)', padding: '1px 6px',
+                      borderRadius: 4,
+                    }}>{opt.tag}</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: T.tx3, marginTop: 2 }}>{opt.desc}</div>
+              </div>
+              <div style={{
+                width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+                border: `2px solid ${T.bdr2}`, background: 'transparent',
+              }} />
+            </div>
+          );
+        })}
+
+        <div style={{
+          fontSize: 11, color: T.tx3, marginTop: 8, lineHeight: 1.5,
+          padding: '8px 10px', background: T.sf, borderRadius: 8,
+          border: `1px solid ${T.bdr}`,
+        }}>
+          🚧 备份功能正在开发中，暂时无法启用。确定方案后会上线。
+        </div>
+      </Section>
+
       {/* Save */}
       <Btn primary full onClick={save} style={{ marginBottom: 10 }}>
         {saved ? '✅ 已保存' : '💾 保存设置'}
