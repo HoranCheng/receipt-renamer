@@ -16,6 +16,7 @@ import {
 } from '../services/pendingQueue';
 import { cacheImage, rekeyCache } from '../services/imageCache';
 import { enqueueFile } from '../services/processor';
+import { enqueueToSW, isSWAvailable, sendTokenToSW } from '../services/swBridge';
 
 // Network check (Android; iOS Safari doesn't expose connection.type)
 function isWifi() {
@@ -187,7 +188,20 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
         }
         // T-015: Immediately enqueue for AI processing after each upload
         if (pending._uploadedFile && onStatusChange) {
-          enqueueFile(pending._uploadedFile, config, onStatusChange, onReceiptProcessed);
+          // Try SW-based background processing first (survives tab switch)
+          const swQueued = isSWAvailable() && enqueueToSW({
+            id: pending._uploadedFile.id,
+            driveFileId: pending._uploadedFile.id,
+            fileName: pending._uploadedFile.name,
+            mimeType: pending._uploadedFile.mimeType,
+            step: 'ai', // Already uploaded, just needs AI
+            proxyUrl: import.meta.env.VITE_AI_PROXY_URL || '',
+            uid: localStorage.getItem('receipt_google_uid') || 'anonymous',
+          });
+          if (!swQueued) {
+            // Fallback: main thread processing
+            enqueueFile(pending._uploadedFile, config, onStatusChange, onReceiptProcessed);
+          }
         }
       } else {
         updateItem(pending.id, { status: 'failed', error: lastError });

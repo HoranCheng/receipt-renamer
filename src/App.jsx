@@ -12,6 +12,7 @@ import {
   getAccessToken,
 } from './services/google';
 import { processInboxBackground, getSavedProgress } from './services/processor';
+import { sendTokenToSW, onSWMessage, resumeSWProcessing } from './services/swBridge';
 import { store, load } from './services/storage';
 import { css } from './styles';
 import Nav from './components/Nav';
@@ -60,27 +61,31 @@ export default function App() {
       setReceipts(r);
       setReady(true);
       if (effectiveClientId && mergedConfig.setupDone) {
-        try {
-          await initGoogleAPI(effectiveClientId);
+        // Load Google API scripts in background — don't block UI
+        initGoogleAPI(effectiveClientId).then(() => {
           if (mergedConfig.connected) {
-            // Set login hint so silent refresh can skip the account picker
             const email = mergedConfig.googleProfile?.email;
             if (email) setLoginHint(email);
 
-            // Try restoring from sessionStorage/localStorage first (no network call)
+            // Try restoring saved token (instant, no network, no UI)
             const restored = tryRestoreSession();
             if (!restored) {
-              // Fall back to silent GIS refresh (uses Google session cookie, should be invisible)
+              // Token expired — try ONE silent refresh in background
+              // prompt: '' means no popup IF user has active Google session
               requestAccessToken({
                 prompt: '',
                 loginHint: email,
                 persistent: mergedConfig.rememberMe,
-              }).catch(() => {});
+              }).catch(() => {
+                // Silent refresh failed — user will need to re-auth on next action
+                // Don't show any loading screen here
+                console.info('Silent token refresh failed — will prompt on next action');
+              });
             }
           }
-        } catch {
+        }).catch(() => {
           console.warn('Google API init skipped on startup');
-        }
+        });
       }
 
       // Check for pending non-receipt alerts from previous sessions
@@ -100,14 +105,63 @@ export default function App() {
     })();
   }, []);
 
+  // Send access token to SW whenever it changes (so SW can make API calls in background)
+  useEffect(() => {
+    if (config.connected) {
+      const token = getAccessToken();
+      if (token) sendTokenToSW(token);
+    }
+  }, [config.connected, procStatus]); // re-send on auth changes
+
+  // Listen for SW background processing results
+  useEffect(() => {
+    onSWMessage({
+      onTaskUpdate: (task) => {
+        // Update processing status when SW reports progress
+        setProcStatus(prev => prev ? { ...prev, processing: true } : { processing: true, total: 1, done: 0, failed: 0, review: 0 });
+      },
+      onTaskDone: (task) => {
+        // SW finished processing a file — add receipt and update status
+        if (task.result) {
+          const receipt = {
+            id: task.driveFileId,
+            driveId: task.driveFileId,
+            ...task.result,
+            status: (task.result.confidence || 0) >= 70 ? 'validated' : 'review',
+            createdAt: new Date().toISOString(),
+          };
+          addReceipt(receipt);
+        }
+        setProcStatus(prev => {
+          if (!prev) return null;
+          const done = (prev.done || 0) + 1;
+          const processing = done < (prev.total || 0);
+          return { ...prev, done, processing };
+        });
+      },
+      onTaskError: (task) => {
+        setProcStatus(prev => {
+          if (!prev) return null;
+          return { ...prev, failed: (prev.failed || 0) + 1 };
+        });
+      },
+    });
+  }, []);
+
   // T-017: Resume processing when app becomes visible again
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState === 'visible' && config.setupDone && config.connected) {
-        // Check if there's unfinished work in inbox
+        // Send fresh token to SW
+        const token = getAccessToken();
+        if (token) sendTokenToSW(token);
+
+        // Resume SW processing
+        resumeSWProcessing();
+
+        // Also check main-thread queue
         const saved = getSavedProgress();
         if (saved && saved.processing) {
-          // There was unfinished work — resume
           triggerProcessing();
         }
       }
