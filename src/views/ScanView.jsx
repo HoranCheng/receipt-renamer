@@ -57,6 +57,44 @@ function ProgressRing({ status }) {
 }
 
 const MAX_RETRIES = 3;
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB per file
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf'];
+
+/** Compress an image file on device. Returns compressed Blob or original if compression fails/isn't needed. */
+async function compressImage(file, maxWidth = 1280, quality = 0.82) {
+  if (file.type === 'application/pdf') return file; // Don't compress PDFs
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      try {
+        const scale = Math.min(maxWidth / img.width, 1); // Only downscale, never upscale
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => {
+            if (blob && blob.size < file.size) {
+              resolve(new File([blob], file.name, { type: 'image/jpeg' }));
+            } else {
+              resolve(file); // Compressed is bigger → keep original
+            }
+          },
+          'image/jpeg',
+          quality
+        );
+      } catch {
+        resolve(file);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
 
 export default function ScanView({ onUploaded, onSync, procStatus, config, onStatusChange, onReceiptProcessed }) {
   // items: { id, name, status, retries, error, previewUrl, fromIndexedDB, fileBlob }
@@ -219,11 +257,28 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
 
   const handleFiles = useCallback(async (fileList) => {
     if (!fileList?.length) return;
-    const files = Array.from(fileList);
+    const rawFiles = Array.from(fileList);
     const inboxFolder = config?.inboxFolder || 'Inbox';
+
+    // Validate files before processing
+    const files = [];
+    for (const file of rawFiles) {
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`文件 "${file.name}" 太大（${(file.size / 1024 / 1024).toFixed(1)}MB），最大支持 20MB`);
+        continue;
+      }
+      if (file.type && !ALLOWED_TYPES.includes(file.type)) {
+        alert(`文件 "${file.name}" 类型不支持（${file.type}）。支持：JPEG、PNG、WebP、HEIC、PDF`);
+        continue;
+      }
+      files.push(file);
+    }
+    if (!files.length) return;
     const wifiOnly = config?.wifiOnlyUpload && !isWifi();
 
-    const newItems = await Promise.all(files.map(async (file) => {
+    const newItems = await Promise.all(files.map(async (rawFile) => {
+      // Compress if enabled
+      const file = config?.compressImages ? await compressImage(rawFile) : rawFile;
       const id = Math.random().toString(36).slice(2) + Date.now();
       const thumbBlob = await createThumbnail(file);
       const previewUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : URL.createObjectURL(file);

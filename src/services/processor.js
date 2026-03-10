@@ -29,6 +29,42 @@ function safeName(s) {
   return s.replace(/[/\\?%*:|"<>]/g, '-').trim();
 }
 
+// ─── Sheets failure outbox (retry later) ──────────────────────────────────────
+
+function _logSheetFailure(fileId, row, sheetId) {
+  try {
+    const key = 'rr-sheets-outbox';
+    const outbox = JSON.parse(localStorage.getItem(key) || '[]');
+    outbox.push({
+      fileId, row, sheetId,
+      failedAt: new Date().toISOString(),
+      retries: 0,
+    });
+    localStorage.setItem(key, JSON.stringify(outbox));
+    console.warn('Sheets write logged to outbox for retry:', fileId);
+  } catch {}
+}
+
+/** Retry any failed Sheets writes from the outbox */
+export async function retrySheetOutbox() {
+  try {
+    const key = 'rr-sheets-outbox';
+    const outbox = JSON.parse(localStorage.getItem(key) || '[]');
+    if (!outbox.length) return;
+    const remaining = [];
+    for (const item of outbox) {
+      try {
+        await appendToSheet(item.sheetId, 'receipt_index', item.row);
+        // Success — don't add to remaining
+      } catch {
+        item.retries = (item.retries || 0) + 1;
+        if (item.retries < 10) remaining.push(item); // Give up after 10 total attempts
+      }
+    }
+    localStorage.setItem(key, JSON.stringify(remaining));
+  } catch {}
+}
+
 // ─── Processing state ─────────────────────────────────────────────────────────
 
 // Global processing queue and state
@@ -134,15 +170,26 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
       // High confidence → validated
       await renameAndMoveFile(file.id, newName, validId, inboxId);
       removeCachedImage(file.id).catch(() => {});
-      // T-016: Auto-write to Sheets immediately
+      // T-016: Auto-write to Sheets with retry + failure logging
       if (config.sheetId) {
-        try {
-          await appendToSheet(config.sheetId, config.sheetName || 'receipt_index', [
-            data.date, data.merchant, data.category, data.amount, data.currency || 'AUD', receiptRecord.driveLink,
-          ]);
-        } catch (e) {
-          console.warn('Sheets auto-sync failed:', e);
+        const sheetRow = [
+          data.date, data.merchant, data.category, data.amount, data.currency || 'AUD', receiptRecord.driveLink,
+        ];
+        let sheetOk = false;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await appendToSheet(config.sheetId, config.sheetName || 'receipt_index', sheetRow);
+            sheetOk = true;
+            break;
+          } catch (e) {
+            console.warn(`Sheets write attempt ${attempt + 1} failed:`, e);
+            if (attempt < 2) await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+          }
+        }
+        if (!sheetOk) {
           receiptRecord.sheetSyncFailed = true;
+          // Log failure for later investigation + outbox retry
+          _logSheetFailure(file.id, sheetRow, config.sheetId);
         }
       }
     } else {

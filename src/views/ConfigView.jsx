@@ -356,6 +356,46 @@ export default function ConfigView({
         )}
       </Section>
 
+      {/* Image Compression Settings */}
+      <Section title="📷 图片处理">
+        <div style={{ fontSize: 12, color: T.tx2, marginBottom: 12, lineHeight: 1.6 }}>
+          上传前压缩照片可以节省 Drive 空间和 AI 识别成本，同时保持小票文字清晰。
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: T.tx }}>上传前压缩</div>
+            <div style={{ fontSize: 11, color: T.tx3, marginTop: 2 }}>
+              {config.compressImages
+                ? '已开启 · 压缩后约 200KB-500KB/张'
+                : '已关闭 · 上传原图（1-5MB/张）'}
+            </div>
+          </div>
+          <button
+            onClick={() => setConfig(c => ({ ...c, compressImages: !c.compressImages }))}
+            style={{
+              width: 48, height: 28, borderRadius: 14, flexShrink: 0,
+              background: config.compressImages ? T.acc : T.bdr2,
+              border: 'none', cursor: 'pointer', position: 'relative', transition: 'background 0.2s',
+            }}
+          >
+            <div style={{
+              width: 22, height: 22, borderRadius: '50%', background: '#fff',
+              position: 'absolute', top: 3,
+              left: config.compressImages ? 23 : 3,
+              transition: 'left 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+            }} />
+          </button>
+        </div>
+        {config.compressImages && (
+          <div style={{
+            fontSize: 11, color: T.tx3, padding: '8px 10px',
+            background: T.sf, borderRadius: 8, border: `1px solid ${T.bdr}`,
+          }}>
+            💡 压缩在设备本地完成，不消耗额外 API 额度。小票文字在 1280px 宽度下仍可清晰辨认。
+          </div>
+        )}
+      </Section>
+
       {/* Backup Settings — T-021 experimental */}
       <Section title="💾 数据备份">
         <div style={{

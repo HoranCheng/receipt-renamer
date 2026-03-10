@@ -15,7 +15,7 @@ import {
 } from './services/google';
 import { processInboxBackground, getSavedProgress } from './services/processor';
 import { sendTokenToSW, onSWMessage, resumeSWProcessing } from './services/swBridge';
-import { store, load } from './services/storage';
+import { store, load, setCurrentUser, clearCurrentUserData, clearAllData } from './services/storage';
 import { css } from './styles';
 import Nav from './components/Nav';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -55,6 +55,15 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
+      // Restore user scope before loading scoped data
+      const legacyConfig = localStorage.getItem('rr-config');
+      if (legacyConfig) {
+        try {
+          const lc = JSON.parse(legacyConfig);
+          if (lc.googleProfile?.sub) setCurrentUser(lc.googleProfile.sub);
+          else if (lc.googleProfile?.email) setCurrentUser(lc.googleProfile.email);
+        } catch {}
+      }
       const c = await load('rr-config', DEFAULT_CONFIG);
       const r = await load('rr-receipts', []);
       // Use built-in Client ID if available
@@ -353,6 +362,9 @@ export default function App() {
       try {
         googleProfile = await fetchUserProfile();
         if (googleProfile?.email) setLoginHint(googleProfile.email);
+        // Set user scope for data isolation
+        if (googleProfile?.sub) setCurrentUser(googleProfile.sub);
+        else if (googleProfile?.email) setCurrentUser(googleProfile.email);
       } catch {
         // Non-fatal — profile display is best-effort
       }
@@ -368,22 +380,23 @@ export default function App() {
 
   const handleSignOut = async () => {
     signOut();
+    // Don't clear user data on sign-out — it stays scoped by user ID.
+    // When another user logs in, they get their own scoped data.
     const updated = { ...config, connected: false };
     setConfig(updated);
     await store('rr-config', updated);
   };
 
   const handleReset = async () => {
-    if (
-      !confirm(
-        '\u786E\u5B9A\u8981\u6E05\u9664\u6240\u6709\u8BBE\u7F6E\u548C\u8BB0\u5F55\u5417\uFF1F'
-      )
-    )
-      return;
+    if (!confirm('确定要清除所有设置和记录吗？')) return;
+    clearAllData();
     setConfig(DEFAULT_CONFIG);
     setReceipts([]);
-    await store('rr-config', DEFAULT_CONFIG);
-    await store('rr-receipts', []);
+    // Also clear IndexedDB caches
+    try {
+      const dbs = ['rr-image-cache', 'rr-pending-uploads', 'rr-sw-queue'];
+      dbs.forEach(name => indexedDB.deleteDatabase(name));
+    } catch {}
   };
 
   if (!ready)

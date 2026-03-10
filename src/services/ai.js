@@ -1,7 +1,9 @@
-import { CATEGORIES } from '../constants';
-
 const PROXY_URL = import.meta.env.VITE_AI_PROXY_URL || '';
-const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || '';
+
+// SECURITY: Max payload size for AI requests (10MB base64 ≈ ~7.5MB file)
+const MAX_BASE64_SIZE = 10 * 1024 * 1024;
+// Allowed MIME types for receipt analysis
+const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'];
 
 // ─── Proxy mode (Gemini 2.0 Flash via receipt-proxy Worker) ──────────────────
 
@@ -37,97 +39,23 @@ async function analyzeViaProxy(base64, mediaType, fileType) {
   return receiptData;
 }
 
-// ─── Direct mode (Anthropic Claude, legacy) ───────────────────────────────────
-
-async function analyzeViaDirect(base64, mediaType, fileType) {
-  const prompt = `You are a receipt data extractor for an Australian user. Analyze this receipt and extract structured data.
-
-RULES:
-- Dates: prefer DD/MM/YYYY (Australian). Output as YYYY-MM-DD.
-- Merchant: clean name only. Remove ABN, PTY LTD, ACN, TAX INVOICE, addresses.
-- Amount: the TOTAL paid. Number only, no currency symbol.
-- Currency: usually AUD unless clearly otherwise.
-- Category: exactly ONE of: ${CATEGORIES.join(', ')}
-- Confidence: 0-100 your certainty
-
-Respond ONLY with this JSON, no markdown, no backticks:
-{"date":"YYYY-MM-DD","merchant":"Clean Name","amount":0.00,"currency":"AUD","category":"Category","items":["item1","item2"],"confidence":85}`;
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'anthropic-version': '2023-06-01',
-  };
-
-  if (API_KEY) {
-    headers['x-api-key'] = API_KEY;
-    headers['anthropic-dangerous-direct-browser-access'] = 'true';
-  }
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            fileType === 'pdf' || mediaType === 'application/pdf'
-              ? {
-                  type: 'document',
-                  source: {
-                    type: 'base64',
-                    media_type: 'application/pdf',
-                    data: base64,
-                  },
-                }
-              : {
-                  type: 'image',
-                  source: {
-                    type: 'base64',
-                    media_type: mediaType,
-                    data: base64,
-                  },
-                },
-            { type: 'text', text: prompt },
-          ],
-        },
-      ],
-    }),
-  });
-
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => '');
-    let detail = errBody;
-    try {
-      const parsed = JSON.parse(errBody);
-      detail = parsed.error?.message || errBody;
-    } catch {
-      // Use raw error body
-    }
-    throw new Error(`AI 识别失败 (${res.status}): ${detail || res.statusText}`);
-  }
-
-  const data = await res.json();
-  const text = data.content?.find((b) => b.type === 'text')?.text || '';
-
-  if (!text) {
-    throw new Error('AI 返回了空内容');
-  }
-
-  try {
-    return JSON.parse(text.replace(/```json|```/g, '').trim());
-  } catch {
-    throw new Error(`AI 返回了无法解析的内容: ${text.slice(0, 100)}`);
-  }
-}
+// ─── Direct mode REMOVED ──────────────────────────────────────────────────────
+// SECURITY: Direct browser→Anthropic API was removed because it exposes the API
+// key in client-side JavaScript. All AI calls MUST go through the proxy Worker.
+// If PROXY_URL is not configured, analyzeReceipt() will throw a clear error.
 
 // ─── Public API (signature unchanged) ────────────────────────────────────────
 
 export async function analyzeReceipt(base64, mediaType, fileType = 'image') {
-  if (PROXY_URL) {
-    return analyzeViaProxy(base64, mediaType, fileType);
+  // Input validation
+  if (!PROXY_URL) {
+    throw new Error('AI 代理未配置。请联系管理员设置 VITE_AI_PROXY_URL。');
   }
-  return analyzeViaDirect(base64, mediaType, fileType);
+  if (base64.length > MAX_BASE64_SIZE) {
+    throw new Error(`文件过大（${(base64.length / 1024 / 1024).toFixed(1)}MB），最大支持 ${MAX_BASE64_SIZE / 1024 / 1024}MB`);
+  }
+  if (!ALLOWED_MIME.includes(mediaType)) {
+    throw new Error(`不支持的文件类型：${mediaType}。支持：JPEG、PNG、WebP、HEIC、PDF`);
+  }
+  return analyzeViaProxy(base64, mediaType, fileType);
 }
