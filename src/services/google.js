@@ -504,6 +504,37 @@ export async function createReceiptSheet(sheetName = 'receipt_index') {
 
 // ─── Sheets ───────────────────────────────────────────────────────────────────
 
+/** Read all rows from the receipt sheet (for multi-device sync) */
+export async function readSheetRecords(spreadsheetId, sheetName = 'receipt_index') {
+  const token = await ensureToken();
+  const range = encodeURIComponent(`${sheetName}!A:F`);
+  const res = await fetch(
+    `${SHEETS_API}/spreadsheets/${spreadsheetId}/values/${range}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error?.message || `Sheets read error (${res.status})`);
+  }
+  const data = await res.json();
+  const rows = data.values || [];
+  if (rows.length <= 1) return []; // Only header or empty
+
+  // Skip header row, map to receipt objects
+  return rows.slice(1).map((row, i) => ({
+    id: `sheet-${i}`,
+    date: row[0] || '',
+    merchant: row[1] || '',
+    category: row[2] || '',
+    amount: row[3] || '',
+    currency: row[4] || 'AUD',
+    driveLink: row[5] || '',
+    driveId: (row[5] || '').match(/\/d\/([^/]+)/)?.[1] || '',
+    status: 'validated',
+    source: 'sheet',
+  })).reverse(); // Most recent first
+}
+
 export async function appendToSheet(spreadsheetId, sheetName, row) {
   const token = await ensureToken();
 

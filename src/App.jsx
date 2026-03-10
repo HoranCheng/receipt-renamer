@@ -182,17 +182,54 @@ export default function App() {
     processInboxBackground(cfg || config, handleProcStatus, addReceipt);
   };
 
-  // Navigate with graceful auth refresh for views that need Drive access
+  // Navigate with unified auth check — if not logged in, redirect to settings
   const handleNav = async (newView) => {
-    const needsAuth = ['review', 'inbox'];
+    const needsAuth = ['review', 'inbox', 'scan'];
     if (needsAuth.includes(newView) && !getAccessToken()) {
-      setAuthLoading(true);
-      try {
-        await requestAccessToken({ prompt: '' });
-      } catch (e) {
-        console.warn('Auth refresh failed:', e);
+      // Try silent restore first (no UI)
+      const restored = tryRestoreSession();
+      if (restored) {
+        // Token restored silently — update connected state if needed
+        if (!config.connected) {
+          try {
+            const googleProfile = await fetchUserProfile();
+            if (googleProfile?.email) setLoginHint(googleProfile.email);
+            const updated = { ...config, connected: true, googleProfile };
+            setConfig(updated);
+            await store('rr-config', updated);
+          } catch {}
+        }
+        navTo(newView);
+        return;
       }
-      setAuthLoading(false);
+
+      // Silent restore failed — try background GIS refresh
+      try {
+        setAuthLoading(true);
+        await requestAccessToken({
+          prompt: '',
+          loginHint: config.googleProfile?.email,
+          persistent: config.rememberMe,
+        });
+        // Auth succeeded silently — update state
+        let googleProfile = config.googleProfile;
+        try {
+          googleProfile = await fetchUserProfile();
+          if (googleProfile?.email) setLoginHint(googleProfile.email);
+        } catch {}
+        const updated = { ...config, connected: true, googleProfile };
+        setConfig(updated);
+        await store('rr-config', updated);
+        setAuthLoading(false);
+        navTo(newView);
+        return;
+      } catch {
+        setAuthLoading(false);
+      }
+
+      // All silent methods failed — redirect to settings for manual login
+      navTo('cfg');
+      return;
     }
     navTo(newView);
   };
@@ -418,6 +455,7 @@ export default function App() {
             receipts={receipts}
             onDelete={deleteReceipt}
             onDetail={(r) => setDetailReceipt(r)}
+            config={config}
           />
         )}
         {view === 'log' && detailReceipt && (

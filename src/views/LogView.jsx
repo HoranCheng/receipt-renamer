@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { T, F, FM } from '../constants/theme';
 import { CAT_ICON, CAT_CLR } from '../constants';
+import { readSheetRecords } from '../services/google';
 import Header from '../components/Header';
 import { haptic } from '../utils/haptics';
 
@@ -282,14 +283,40 @@ function SwipeRow({ r, onDelete, onDetail }) {
   );
 }
 
-export default function LogView({ receipts, onDelete, onDetail }) {
+export default function LogView({ receipts, onDelete, onDetail, config }) {
   const [timePeriod, setTimePeriod] = useState('month'); // week | month | all
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [showExport, setShowExport] = useState(false);
+  const [sheetRecords, setSheetRecords] = useState(null); // null = not loaded, [] = empty
+  const [sheetLoading, setSheetLoading] = useState(false);
+  const [syncSource, setSyncSource] = useState('local'); // 'local' | 'cloud'
+
+  // Fetch records from Sheets for multi-device sync
+  useEffect(() => {
+    if (config?.sheetId && config?.connected) {
+      setSheetLoading(true);
+      readSheetRecords(config.sheetId, config.sheetName || 'receipt_index')
+        .then(records => {
+          setSheetRecords(records);
+          // Auto-switch to cloud view if local is empty but cloud has data
+          if (receipts.length === 0 && records.length > 0) {
+            setSyncSource('cloud');
+          }
+          setSheetLoading(false);
+        })
+        .catch(e => {
+          console.warn('Sheets sync failed:', e);
+          setSheetLoading(false);
+        });
+    }
+  }, [config?.sheetId]);
+
+  // Use the selected data source
+  const activeReceipts = syncSource === 'cloud' && sheetRecords ? sheetRecords : receipts;
 
   // Apply time filter first, then category + search
-  const timeFiltered = filterByTime(receipts, timePeriod);
+  const timeFiltered = filterByTime(activeReceipts, timePeriod);
 
   const filtered = timeFiltered.filter((r) => {
     if (filter !== 'all' && r.category !== filter) return false;
@@ -374,6 +401,50 @@ export default function LogView({ receipts, onDelete, onDetail }) {
           </div>
         )}
       </div>
+
+      {/* Data source toggle — only show when cloud data is available */}
+      {sheetRecords && sheetRecords.length > 0 && (
+        <div style={{
+          display: 'flex', gap: 6, marginBottom: 10,
+          background: T.sf2, borderRadius: 12, padding: 4,
+        }}>
+          {[
+            { id: 'local', label: '📱 本设备', count: receipts.length },
+            { id: 'cloud', label: '☁️ 云端记录', count: sheetRecords.length },
+          ].map(s => (
+            <button
+              key={s.id}
+              onClick={() => setSyncSource(s.id)}
+              style={{
+                flex: 1, padding: '7px 0',
+                borderRadius: 9, border: 'none', cursor: 'pointer',
+                background: syncSource === s.id ? T.card : 'transparent',
+                color: syncSource === s.id ? T.tx : T.tx3,
+                fontSize: 12, fontWeight: syncSource === s.id ? 700 : 500,
+                fontFamily: F,
+                boxShadow: syncSource === s.id ? '0 1px 4px rgba(0,0,0,0.2)' : 'none',
+                transition: 'all 0.15s',
+              }}
+            >
+              {s.label} ({s.count})
+            </button>
+          ))}
+        </div>
+      )}
+
+      {sheetLoading && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center',
+          padding: '8px', marginBottom: 10, fontSize: 12, color: T.tx3,
+        }}>
+          <div style={{
+            width: 12, height: 12, border: `2px solid ${T.bdr}`,
+            borderTopColor: T.acc, borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite',
+          }} />
+          正在同步云端记录…
+        </div>
+      )}
 
       {/* Time period selector */}
       <div style={{
