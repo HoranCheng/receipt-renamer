@@ -49,6 +49,16 @@
 | T-019 | AI 识别进度实时反馈：每识别完一张就更新计数（剩余 X 张） | P1 | ✅ Done |
 | T-020 | 记录界面点击小票名称可查看原始照片（不占用太多本地存储） | P2 | ✅ Done |
 
+### Additional fixes (2026-03-11)
+
+| ID | Task | Priority | Status |
+|----|------|----------|--------|
+| T-021 | 数据备份设置 UI（实验性，功能待开发） | P2 | 🔲 Pending decision |
+| T-022 | deleteFile 使用了 Drive API v2 接口导致删除永远失败 | P0 | ✅ Done |
+| T-023 | 命名格式改为「日期 + 分类」，不含商家名和价格 | P1 | ✅ Done |
+| T-024 | Service Worker 后台上传 + AI 识别（IndexedDB 队列 + Background Sync） | P1 | ✅ Done |
+| T-025 | 登录优化：Google API 加载不阻塞 UI，静默刷新 token | P1 | ✅ Done |
+
 ---
 
 ## Backlog (v0.4.0+)
