@@ -1,175 +1,378 @@
-import { T } from '../constants/theme';
+import { useState } from 'react';
+import { T, F } from '../constants/theme';
 import Header from '../components/Header';
-import Field from '../components/Field';
 import Btn from '../components/Btn';
 import StatusDot from '../components/StatusDot';
+import { createReceiptSheet, renameSubFolder } from '../services/google';
+
+// ─── Stable sub-components (defined OUTSIDE to avoid remount on every render) ─
+
+function Section({ title, children }) {
+  return (
+    <div style={{
+      background: T.card, border: `1px solid ${T.bdr}`,
+      borderRadius: 16, padding: '16px', marginBottom: 14,
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: T.tx3, letterSpacing: '1px', marginBottom: 12 }}>
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Row({ icon, label, sub, right }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12,
+      padding: '10px 0',
+      borderBottom: `1px solid ${T.bdr}`,
+    }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: 10,
+        background: T.sf2, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 18, flexShrink: 0,
+      }}>{icon}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: T.tx }}>{label}</div>
+        {sub && <div style={{ fontSize: 11, color: T.tx3, marginTop: 1 }}>{sub}</div>}
+      </div>
+      {right}
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ConfigView({
   config,
   setConfig,
   onSave,
   onReconnect,
+  onSignOut,
   onReset,
 }) {
+  const [creatingSheet, setCreatingSheet] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [folderEdit, setFolderEdit] = useState({});
+
+  const save = async () => {
+    await onSave(config);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
   return (
     <div style={{ padding: '0 16px 100px' }}>
-      <Header
-        title={'\u8BBE\u7F6E'}
-        sub={'Google \u8FDE\u63A5\u4E0E\u6587\u4EF6\u5939\u914D\u7F6E'}
-      />
+      <Header title="设置" sub="账号与偏好" />
 
-      {/* Connection Status */}
-      <div
-        style={{
-          background: T.card,
-          border: `1px solid ${T.bdr}`,
-          borderRadius: 14,
-          padding: '16px',
-          marginBottom: 16,
-        }}
-      >
-        <div
+      {/* Google Account */}
+      <Section title="🔐 Google 账号">
+        {config.connected && config.googleProfile ? (
+          /* Profile card — connected state */
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '6px 0 12px' }}>
+              {config.googleProfile.picture ? (
+                <img src={config.googleProfile.picture} alt="" referrerPolicy="no-referrer"
+                  style={{ width: 52, height: 52, borderRadius: '50%', flexShrink: 0,
+                    border: `2px solid ${T.acc}`, objectFit: 'cover' }} />
+              ) : (
+                <div style={{ width: 52, height: 52, borderRadius: '50%', flexShrink: 0,
+                  background: T.sf2, display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', fontSize: 24, border: `2px solid ${T.bdr}` }}>
+                  🧑‍💼
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: T.tx,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {config.googleProfile.name || '已连接'}
+                </div>
+                <div style={{ fontSize: 12, color: T.tx3, marginTop: 2,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {config.googleProfile.email || ''}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                  <StatusDot level="ok" />
+                  <span style={{ fontSize: 10, color: T.grn }}>已连接</span>
+                </div>
+              </div>
+              <Btn small onClick={onSignOut}
+                style={{ color: T.red, borderColor: 'rgba(239,68,68,0.3)', fontSize: 11 }}>
+                退出
+              </Btn>
+            </div>
+          </>
+        ) : (
+          /* Not connected — show connect button + remember me checkbox */
+          <>
+            <div style={{ fontSize: 12, color: T.tx3, marginBottom: 14, lineHeight: 1.6 }}>
+              连接 Google 账号后才能上传小票到 Drive 和记录消费数据。
+            </div>
+            {/* Remember me checkbox */}
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 12px', marginBottom: 12,
+              background: T.sf2, borderRadius: 12, cursor: 'pointer',
+              border: `1px solid ${rememberMe ? 'rgba(250,204,21,0.3)' : T.bdr}`,
+              transition: 'border-color 0.15s',
+            }}>
+              <div style={{
+                width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+                border: `2px solid ${rememberMe ? T.acc : T.bdr2}`,
+                background: rememberMe ? T.acc : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.15s',
+              }}>
+                {rememberMe && <span style={{ color: '#000', fontSize: 12, fontWeight: 800, lineHeight: 1 }}>✓</span>}
+              </div>
+              <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)}
+                style={{ display: 'none' }} />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: T.tx }}>记住我的登录状态</div>
+                <div style={{ fontSize: 11, color: T.tx3, marginTop: 1 }}>
+                  关闭浏览器再打开也不用重新登录
+                </div>
+              </div>
+            </label>
+            <Btn primary full onClick={() => onReconnect(rememberMe)}>
+              🔗 连接 Google 账号
+            </Btn>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 10 }}>
+              <StatusDot level="err" />
+              <span style={{ fontSize: 11, color: T.red }}>未连接，请先授权 Google 账号</span>
+            </div>
+          </>
+        )}
+      </Section>
+
+      {/* Upload Settings */}
+      <Section title="📡 上传设置">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: T.tx }}>仅在 WiFi 下上传</div>
+            <div style={{ fontSize: 11, color: T.tx3, marginTop: 2 }}>开启后，使用手机流量时不会上传照片（省流量）</div>
+            <div style={{ fontSize: 10, color: T.tx3, marginTop: 1, opacity: 0.7 }}>注：此功能在 iOS Safari 上可能不生效</div>
+          </div>
+          <button
+            onClick={() => setConfig(c => ({ ...c, wifiOnlyUpload: !c.wifiOnlyUpload }))}
+            style={{
+              width: 48, height: 28, borderRadius: 14, flexShrink: 0,
+              background: config.wifiOnlyUpload ? T.acc : T.bdr2,
+              border: 'none', cursor: 'pointer', position: 'relative', transition: 'background 0.2s',
+            }}
+          >
+            <div style={{
+              width: 22, height: 22, borderRadius: '50%', background: '#fff',
+              position: 'absolute', top: 3,
+              left: config.wifiOnlyUpload ? 23 : 3,
+              transition: 'left 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+            }} />
+          </button>
+        </div>
+      </Section>
+
+      {/* Drive Folders */}
+      <Section title="📁 Drive 文件夹">
+        <div style={{ fontSize: 12, color: T.tx2, marginBottom: 10, lineHeight: 1.6 }}>
+          小票会存到 Google Drive 的 <strong>Receipt Renamer</strong> 文件夹里，分四个子文件夹存放：
+        </div>
+        {/* Folder summary — always visible */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+          {[
+            { icon: '📥', label: '待处理', key: 'inboxFolder', desc: '刚上传的小票先放这里' },
+            { icon: '✅', label: '已存档', key: 'validatedFolder', desc: 'AI 确认无误后自动归档' },
+            { icon: '⚠️', label: '待确认', key: 'reviewFolder', desc: '需要你确认的小票 + 非小票图片' },
+          ].map(({ icon, label, key }) => (
+            <div key={key} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '6px 10px', background: T.sf2, borderRadius: 10,
+            }}>
+              <span style={{ fontSize: 14, flexShrink: 0 }}>{icon}</span>
+              <span style={{ fontSize: 12, color: T.tx2, flexShrink: 0, width: 44 }}>{label}</span>
+              <span style={{
+                fontSize: 12, fontWeight: 600, color: T.tx, overflow: 'hidden',
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+              }}>
+                📂 {config[key] || '（未设置）'}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* Advanced settings toggle */}
+        <button
+          onClick={() => setShowAdvanced(v => !v)}
           style={{
+            width: '100%',
+            padding: '10px 12px',
+            background: T.sf2,
+            border: `1px solid ${T.bdr}`,
+            borderRadius: 10,
+            color: T.tx2,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            marginBottom: 10,
+            marginBottom: 4,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <StatusDot level={config.connected ? 'ok' : 'err'} />
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: config.connected ? T.grn : T.red,
-              }}
-            >
-              {config.connected
-                ? 'Google \u5DF2\u8FDE\u63A5'
-                : '\u672A\u8FDE\u63A5'}
-            </span>
+          <span>⚙️ 高级设置</span>
+          <span style={{ fontSize: 14, transition: 'transform 0.2s', transform: showAdvanced ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+            ▾
+          </span>
+        </button>
+
+        {showAdvanced && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 11, color: T.tx3, marginBottom: 12, lineHeight: 1.5 }}>
+              修改后点「重命名」，App 会直接在 Drive 里将对应文件夹改名，文件无需手动移动。
+            </div>
+            {[
+              { icon: '📥', label: '待处理', key: 'inboxFolder' },
+              { icon: '✅', label: '已存档', key: 'validatedFolder' },
+              { icon: '⚠️', label: '待确认', key: 'reviewFolder' },
+            ].map(({ icon, label, key }) => {
+              const fe = folderEdit[key] || {};
+              // draft is always the editable value; initialize from config on first render
+              const draft = fe.draft !== undefined ? fe.draft : (config[key] || '');
+              const isDirty = draft !== (config[key] || '');
+              const isRenaming = fe.renaming;
+              const isDone = fe.done;
+
+              const setDraft = (v) => setFolderEdit(p => ({
+                ...p, [key]: { ...p[key], draft: v, done: false },
+              }));
+
+              const doRename = async () => {
+                if (!isDirty || !draft.trim()) return;
+                setFolderEdit(p => ({ ...p, [key]: { ...p[key], renaming: true } }));
+                try {
+                  await renameSubFolder(config[key], draft.trim());
+                  setConfig(c => ({ ...c, [key]: draft.trim() }));
+                  // Reset draft to new name so isDirty becomes false
+                  setFolderEdit(p => ({ ...p, [key]: { draft: draft.trim(), renaming: false, done: true } }));
+                  onSave?.({ ...config, [key]: draft.trim() });
+                  setTimeout(() => setFolderEdit(p => ({ ...p, [key]: { ...p[key], done: false } })), 2000);
+                } catch (e) {
+                  setFolderEdit(p => ({ ...p, [key]: { ...p[key], renaming: false } }));
+                  alert('重命名失败：' + e.message);
+                }
+              };
+
+              return (
+                <div key={key} style={{ padding: '12px 0', borderBottom: `1px solid ${T.bdr}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <span style={{ fontSize: 16 }}>{icon}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: T.tx, flex: 1 }}>{label}</span>
+                    {isDone && <span style={{ fontSize: 11, color: T.grn }}>✓ 已重命名</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      value={draft}
+                      onChange={e => setDraft(e.target.value)}
+                      placeholder="输入文件夹名称"
+                      style={{
+                        flex: 1, padding: '8px 10px',
+                        background: T.sf, border: `1px solid ${isDirty ? T.acc : T.bdr2}`,
+                        borderRadius: 8, color: T.tx, fontSize: 12, fontFamily: F,
+                        transition: 'border-color 0.15s', outline: 'none',
+                      }}
+                    />
+                    <button
+                      onClick={doRename}
+                      disabled={!isDirty || isRenaming}
+                      style={{
+                        flexShrink: 0, padding: '8px 14px',
+                        background: isDirty && !isRenaming ? T.accDim : T.sf2,
+                        border: `1px solid ${isDirty ? 'rgba(250,204,21,0.35)' : T.bdr}`,
+                        borderRadius: 8, color: isDirty && !isRenaming ? T.acc : T.tx3,
+                        fontSize: 12, fontWeight: 700, cursor: isDirty ? 'pointer' : 'not-allowed',
+                        fontFamily: F, display: 'flex', alignItems: 'center', gap: 5,
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {isRenaming ? (
+                        <div style={{ width: 12, height: 12, border: `2px solid ${T.bdr}`,
+                          borderTopColor: T.acc, borderRadius: '50%',
+                          animation: 'spin 0.8s linear infinite' }} />
+                      ) : '重命名'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <Btn small onClick={onReconnect}>
-            {config.connected ? '\u91CD\u65B0\u8FDE\u63A5' : '\u8FDE\u63A5'}
+        )}
+      </Section>
+
+      {/* Sheet */}
+      <Section title="📊 消费记录表">
+        <div style={{ fontSize: 12, color: T.tx2, marginBottom: 12, lineHeight: 1.6 }}>
+          每次处理完小票，数据会自动同步到 Google Sheets 表格，方便你对账和统计。
+        </div>
+        {config.sheetId ? (
+          <div style={{
+            background: T.sf2, borderRadius: 10, padding: '12px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: T.grn }}>✅ 记录表已连接</div>
+              <div style={{ fontSize: 10, color: T.tx3, fontFamily: 'monospace', marginTop: 2 }}>
+                {config.sheetId.slice(0, 28)}…
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <a href={`https://docs.google.com/spreadsheets/d/${config.sheetId}`}
+                target="_blank" rel="noreferrer"
+                style={{ fontSize: 11, color: T.acc, textDecoration: 'none' }}>
+                打开 ↗
+              </a>
+              <button onClick={() => setConfig(c => ({ ...c, sheetId: '' }))}
+                style={{ fontSize: 11, color: T.red, background: 'none', border: 'none', cursor: 'pointer' }}>
+                移除
+              </button>
+            </div>
+          </div>
+        ) : (
+          <Btn
+            small primary full
+            onClick={async () => {
+              setCreatingSheet(true);
+              try {
+                const id = await createReceiptSheet('receipt_index');
+                setConfig(c => ({ ...c, sheetId: id, sheetName: 'receipt_index' }));
+              } catch (e) { alert('创建失败：' + e.message); }
+              setCreatingSheet(false);
+            }}
+            disabled={creatingSheet}
+          >
+            {creatingSheet ? '创建中…' : '✨ 一键创建记录表'}
           </Btn>
-        </div>
-        <div style={{ fontSize: 11, color: T.tx3 }}>
-          Client ID: {config.clientId?.slice(0, 20)}...
-        </div>
-      </div>
+        )}
+      </Section>
 
-      <Field
-        label="OAuth Client ID"
-        icon={'\u{1F511}'}
-        value={config.clientId}
-        onChange={(v) => setConfig((c) => ({ ...c, clientId: v }))}
-        mono
-        placeholder="xxxxx.apps.googleusercontent.com"
-      />
-      <Field
-        label={'\u6536\u4EF6\u7BB1'}
-        icon={'\u{1F4E5}'}
-        value={config.inboxFolder}
-        onChange={(v) => setConfig((c) => ({ ...c, inboxFolder: v }))}
-        placeholder="00_inbox"
-      />
-      <Field
-        label={'\u5DF2\u9A8C\u8BC1'}
-        icon={'\u2705'}
-        value={config.validatedFolder}
-        onChange={(v) => setConfig((c) => ({ ...c, validatedFolder: v }))}
-        placeholder="10_validated"
-      />
-      <Field
-        label={'\u5F85\u5BA1\u6838'}
-        icon={'\u26A0\uFE0F'}
-        value={config.reviewFolder}
-        onChange={(v) => setConfig((c) => ({ ...c, reviewFolder: v }))}
-        placeholder="20_review_needed"
-      />
-      <Field
-        label="Sheets ID"
-        icon={'\u{1F4CA}'}
-        value={config.sheetId}
-        onChange={(v) => setConfig((c) => ({ ...c, sheetId: v }))}
-        mono
-        placeholder={'\u53EF\u9009'}
-      />
-      <Field
-        label={'\u5DE5\u4F5C\u8868\u540D'}
-        icon={'\u{1F4CB}'}
-        value={config.sheetName}
-        onChange={(v) => setConfig((c) => ({ ...c, sheetName: v }))}
-        placeholder="receipt_index"
-      />
-
-      <Btn
-        primary
-        full
-        onClick={() => onSave(config)}
-        style={{ marginTop: 4, marginBottom: 12 }}
-      >
-        {'\u{1F4BE} \u4FDD\u5B58\u8BBE\u7F6E'}
-      </Btn>
-      <Btn danger full onClick={onReset}>
-        {'\u{1F5D1}\uFE0F \u91CD\u7F6E\u6240\u6709\u6570\u636E'}
+      {/* Save */}
+      <Btn primary full onClick={save} style={{ marginBottom: 10 }}>
+        {saved ? '✅ 已保存' : '💾 保存设置'}
       </Btn>
 
-      {/* Info */}
-      <div
-        style={{
-          marginTop: 24,
-          padding: '16px',
-          background: T.sf,
-          borderRadius: 12,
-          border: `1px solid ${T.bdr}`,
-        }}
-      >
-        <div
-          style={{
-            fontSize: 12,
-            fontWeight: 700,
-            color: T.tx2,
-            marginBottom: 8,
-          }}
-        >
-          {'\u2139\uFE0F \u5DE5\u4F5C\u539F\u7406'}
+      {/* Danger zone */}
+      <div style={{
+        background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.15)',
+        borderRadius: 14, padding: '14px 16px',
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: T.red, marginBottom: 8 }}>危险区域</div>
+        <div style={{ fontSize: 12, color: T.tx3, marginBottom: 10 }}>
+          清除所有本地数据（不影响 Google Drive 和 Sheets 里的文件）
         </div>
-        <div style={{ fontSize: 11, color: T.tx3, lineHeight: 1.8 }}>
-          {
-            '1. \u4ECE Drive \u6536\u4EF6\u7BB1\u8BFB\u53D6\u5C0F\u7968\u56FE\u7247/PDF'
-          }
-          <br />
-          {
-            '2. AI \u81EA\u52A8\u63D0\u53D6\u65E5\u671F\u3001\u5546\u6237\u3001\u91D1\u989D\u3001\u5206\u7C7B'
-          }
-          <br />
-          {
-            '3. \u91CD\u547D\u540D\u4E3A\u300CYYYY-MM-DD \u5206\u7C7B \u5546\u6237.ext\u300D'
-          }
-          <br />
-          {
-            '4. \u9AD8\u7F6E\u4FE1 \u2192 \u5DF2\u9A8C\u8BC1\u6587\u4EF6\u5939 / \u4F4E\u7F6E\u4FE1 \u2192 \u5F85\u5BA1\u6838'
-          }
-          <br />
-          {
-            '5. \u5143\u6570\u636E\u540C\u6B65\u5230 Google Sheets\uFF08\u53EF\u9009\uFF09'
-          }
-          <br />
-          <br />
-          <strong style={{ color: T.tx2 }}>{'AI \u5F15\u64CE\uFF1A'}</strong>
-          {
-            'Claude Sonnet\uFF08\u9700\u5728 .env \u4E2D\u914D\u7F6E Anthropic API Key \u6216\u4EE3\u7406 URL\uFF09'
-          }
-          <br />
-          <strong style={{ color: T.tx2 }}>
-            {'\u6570\u636E\u5B89\u5168\uFF1A'}
-          </strong>
-          {
-            '\u6240\u6709\u6570\u636E\u5B58\u5728\u60A8\u81EA\u5DF1\u7684 Google \u8D26\u53F7\u4E2D'
-          }
-        </div>
+        <Btn small onClick={onReset} style={{ color: T.red, borderColor: 'rgba(239,68,68,0.3)' }}>
+          🗑️ 清除本地缓存
+        </Btn>
       </div>
     </div>
   );

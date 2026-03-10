@@ -50,25 +50,25 @@ export const CAT_CLR = {
 };
 
 export const SCOPES =
-  'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
+  'openid email profile https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
 
 export const DISCOVERY_DOCS = [
   'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
   'https://www.googleapis.com/discovery/v1/apis/sheets/v4/rest',
 ];
 
-export const DRIVE_FOLDERS = {
-  inbox: '00_inbox',
-  validated: '10_validated',
-  review: '20_flags/review_needed',
-};
+// Default Drive subfolder names (under "Receipt Renamer/" root)
+// These can be changed per-user in ConfigView > 高级设置
 
 export const DEFAULT_CONFIG = {
   clientId: '',
   connected: false,
-  inboxFolder: '00_inbox',
-  validatedFolder: '10_validated',
-  reviewFolder: '20_review_needed',
+  googleProfile: null,           // { name, email, picture }
+  inboxFolder: '小票待处理',
+  validatedFolder: '小票已存档',
+  reviewFolder: '小票待确认',
+  // notReceiptFolder removed — non-receipts go to reviewFolder + in-app alert
+  wifiOnlyUpload: false,
   sheetId: '',
   sheetName: 'receipt_index',
   setupDone: false,

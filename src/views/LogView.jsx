@@ -1,9 +1,8 @@
-import { useState } from 'react';
-import { T, F } from '../constants/theme';
+import { useState, useRef } from 'react';
+import { T, F, FM } from '../constants/theme';
 import { CAT_ICON, CAT_CLR } from '../constants';
 import Header from '../components/Header';
-import Btn from '../components/Btn';
-import ReceiptRow from '../components/ReceiptRow';
+import { haptic } from '../utils/haptics';
 
 function downloadFile(content, filename, mime) {
   const blob = new Blob([content], { type: mime });
@@ -46,39 +45,378 @@ function exportJSON(receipts) {
   );
 }
 
+// ─── Time filter helper ───────────────────────────────────────────────────────
+
+function parseReceiptDate(r) {
+  // date format: "2026.03.10" or "2026-03-10"
+  if (!r.date) return null;
+  return new Date(r.date.replace(/\./g, '-'));
+}
+
+function filterByTime(receipts, period) {
+  if (period === 'all') return receipts;
+  const now = new Date();
+  return receipts.filter((r) => {
+    const d = parseReceiptDate(r);
+    if (!d || isNaN(d)) return false;
+    if (period === 'month') {
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    }
+    if (period === 'week') {
+      return (now - d) <= 7 * 24 * 60 * 60 * 1000;
+    }
+    return true;
+  });
+}
+
+const PERIOD_LABELS = { week: '本周', month: '本月', all: '全部' };
+const MONTH_NAMES = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+function periodSub(period) {
+  const now = new Date();
+  if (period === 'month') return `${now.getFullYear()}年${MONTH_NAMES[now.getMonth()]}`;
+  if (period === 'week') return '最近 7 天';
+  return '全部记录';
+}
+
+// ─── Donut chart ──────────────────────────────────────────────────────────────
+
+function DonutChart({ receipts, periodLabel }) {
+  const circum = 2 * Math.PI * 44; // ~276.46
+  const totalAll = receipts.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
+  const cats = [...new Set(receipts.map((r) => r.category || 'Other'))];
+  const catTotals = cats
+    .map((c) => ({
+      cat: c,
+      total: receipts
+        .filter((r) => (r.category || 'Other') === c)
+        .reduce((s, r) => s + parseFloat(r.amount || 0), 0),
+    }))
+    .filter((x) => x.total > 0)
+    .sort((a, b) => b.total - a.total);
+
+  let cumulOffset = 0;
+  const segments = catTotals.map(({ cat, total }) => {
+    const segLen = totalAll > 0 ? (total / totalAll) * circum : 0;
+    const offset = cumulOffset;
+    cumulOffset += segLen;
+    return { cat, total, segLen, offset };
+  });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ position: 'relative', width: 104, height: 104 }}>
+        <svg
+          viewBox="0 0 104 104"
+          width={104}
+          height={104}
+          style={{ transform: 'rotate(-90deg)' }}
+        >
+          {/* Background circle */}
+          <circle cx={52} cy={52} r={44} fill="none" stroke={T.bdr} strokeWidth={10} />
+          {/* Segments */}
+          {segments.map(({ cat, segLen, offset }) => (
+            <circle
+              key={cat}
+              cx={52}
+              cy={52}
+              r={44}
+              fill="none"
+              stroke={CAT_CLR[cat] || T.acc}
+              strokeWidth={10}
+              strokeDasharray={`${segLen} ${circum}`}
+              strokeDashoffset={-offset}
+              strokeLinecap="butt"
+            />
+          ))}
+        </svg>
+        {/* Center text — not rotated */}
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          pointerEvents: 'none',
+        }}>
+          <span style={{ fontSize: 18, fontWeight: 800, color: T.tx, fontFamily: FM, lineHeight: 1 }}>
+            ${totalAll.toFixed(0)}
+          </span>
+          <span style={{ fontSize: 10, color: T.tx3, fontFamily: F, marginTop: 2 }}>{periodLabel || '合计'}</span>
+        </div>
+      </div>
+
+      {/* Category pills below donut */}
+      <div style={{
+        display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4,
+        scrollbarWidth: 'none', marginTop: 10, maxWidth: '100%',
+      }}>
+        {catTotals.map(({ cat, total }) => (
+          <div key={cat} style={{
+            flexShrink: 0,
+            padding: '4px 10px',
+            borderRadius: 20,
+            background: `${CAT_CLR[cat] || T.acc}18`,
+            border: `1px solid ${CAT_CLR[cat] || T.acc}40`,
+            fontSize: 11,
+            color: CAT_CLR[cat] || T.acc,
+            fontFamily: F,
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}>
+            {CAT_ICON[cat]} {cat} ${total.toFixed(0)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Swipe-to-delete row
+function SwipeRow({ r, onDelete, onDetail }) {
+  const [offsetX, setOffsetX] = useState(0);
+  const touchStartX = useRef(null);
+  const cat = r.category || 'Other';
+  const catColor = CAT_CLR[cat] || T.acc;
+  const isOpen = offsetX <= -60;
+
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+  };
+
+  const handleTouchMove = (e) => {
+    if (touchStartX.current === null) return;
+    const dx = e.touches[0].clientX - touchStartX.current;
+    if (dx < 0) {
+      setOffsetX(Math.max(dx, -72));
+    } else if (offsetX < 0) {
+      setOffsetX(Math.min(0, offsetX + dx));
+      touchStartX.current = e.touches[0].clientX;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchStartX.current = null;
+    setOffsetX(offsetX < -40 ? -72 : 0);
+  };
+
+  return (
+    <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 14 }}>
+      {/* Delete area */}
+      <div style={{
+        position: 'absolute',
+        right: 0, top: 0, bottom: 0,
+        width: 72,
+        background: T.red,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: '0 14px 14px 0',
+      }}>
+        <button
+          onClick={() => { haptic('light'); onDelete(r.id); }}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: '#fff', fontSize: 20,
+            width: '100%', height: '100%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          🗑️
+        </button>
+      </div>
+
+      {/* Row content */}
+      <div
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onClick={() => { if (!isOpen) onDetail && onDetail(r); }}
+        style={{
+          transform: `translateX(${offsetX}px)`,
+          transition: touchStartX.current ? 'none' : 'transform 0.2s ease',
+          background: T.card,
+          border: `1px solid ${T.bdr}`,
+          borderRadius: 14,
+          padding: '12px 14px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          cursor: 'pointer',
+        }}
+      >
+        {/* Category icon square */}
+        <div style={{
+          width: 40, height: 40,
+          borderRadius: 12,
+          background: `${catColor}26`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 20, flexShrink: 0,
+        }}>
+          {CAT_ICON[cat] || '📄'}
+        </div>
+
+        {/* Merchant + meta */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 14, fontWeight: 700, color: T.tx,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {r.merchant || r.originalName || '未知商家'}
+          </div>
+          <div style={{ fontSize: 11, color: T.tx3, marginTop: 2 }}>
+            {r.date || '—'} · {cat}
+          </div>
+        </div>
+
+        {/* Amount */}
+        <div style={{
+          fontSize: 16, fontWeight: 700, color: T.tx,
+          fontFamily: FM, flexShrink: 0,
+        }}>
+          ${parseFloat(r.amount || 0).toFixed(2)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LogView({ receipts, onDelete, onDetail }) {
+  const [timePeriod, setTimePeriod] = useState('month'); // week | month | all
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const filtered = receipts.filter((r) => {
+  const [showExport, setShowExport] = useState(false);
+
+  // Apply time filter first, then category + search
+  const timeFiltered = filterByTime(receipts, timePeriod);
+
+  const filtered = timeFiltered.filter((r) => {
     if (filter !== 'all' && r.category !== filter) return false;
-    if (search && !r.merchant?.toLowerCase().includes(search.toLowerCase()))
+    if (search && !(r.merchant?.toLowerCase().includes(search.toLowerCase()) || r.category?.toLowerCase().includes(search.toLowerCase())))
       return false;
     return true;
   });
-  const cats = [...new Set(receipts.map((r) => r.category || 'Other'))];
+
+  const cats = [...new Set(timeFiltered.map((r) => r.category || 'Other'))];
+  const totalAll = timeFiltered.reduce((s, r) => s + parseFloat(r.amount || 0), 0);
+  const catTotals = cats
+    .map((c) => ({
+      cat: c,
+      total: timeFiltered
+        .filter((r) => (r.category || 'Other') === c)
+        .reduce((s, r) => s + parseFloat(r.amount || 0), 0),
+    }))
+    .sort((a, b) => b.total - a.total);
 
   return (
     <div style={{ padding: '0 16px 100px' }}>
-      <Header
-        title={'\u5168\u90E8\u8BB0\u5F55'}
-        sub={`\u5171 ${receipts.length} \u6761`}
-      />
+      {/* Header row with export menu */}
+      <div style={{ position: 'relative' }}>
+        <Header title="消费记录" sub={`${timeFiltered.length} 张 · $${totalAll.toFixed(2)} · ${periodSub(timePeriod)}`} />
+        {receipts.length > 0 && (
+          <div style={{ position: 'absolute', top: 16, right: 0 }}>
+            <button
+              onClick={() => setShowExport(v => !v)}
+              onBlur={() => setTimeout(() => setShowExport(false), 150)}
+              style={{
+                width: 32, height: 32,
+                borderRadius: 10,
+                background: T.card,
+                border: `1px solid ${T.bdr}`,
+                color: T.tx2,
+                fontSize: 18,
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              ⋯
+            </button>
+            {showExport && (
+              <div style={{
+                position: 'absolute', right: 0, top: 38,
+                background: T.sf,
+                border: `1px solid ${T.bdr}`,
+                borderRadius: 12,
+                overflow: 'hidden',
+                zIndex: 200,
+                minWidth: 160,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                animation: 'scaleIn 0.15s ease',
+              }}>
+                <button
+                  onClick={() => { exportCSV(receipts); setShowExport(false); }}
+                  style={{
+                    display: 'block', width: '100%',
+                    padding: '12px 16px',
+                    background: 'none', border: 'none',
+                    borderBottom: `1px solid ${T.bdr}`,
+                    color: T.tx, fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', textAlign: 'left', fontFamily: F,
+                  }}
+                >
+                  📊 导出 CSV
+                </button>
+                <button
+                  onClick={() => { exportJSON(receipts); setShowExport(false); }}
+                  style={{
+                    display: 'block', width: '100%',
+                    padding: '12px 16px',
+                    background: 'none', border: 'none',
+                    color: T.tx, fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', textAlign: 'left', fontFamily: F,
+                  }}
+                >
+                  💾 导出 JSON
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
-      {/* Export buttons */}
-      {receipts.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <Btn small onClick={() => exportCSV(receipts)} style={{ flex: 1 }}>
-            📊 导出 CSV
-          </Btn>
-          <Btn small onClick={() => exportJSON(receipts)} style={{ flex: 1 }}>
-            💾 导出 JSON
-          </Btn>
+      {/* Time period selector */}
+      <div style={{
+        display: 'flex', gap: 6, marginBottom: 12,
+        background: T.sf2, borderRadius: 12, padding: 4,
+      }}>
+        {(['week', 'month', 'all']).map((p) => (
+          <button
+            key={p}
+            onClick={() => { setTimePeriod(p); setFilter('all'); }}
+            style={{
+              flex: 1, padding: '7px 0',
+              borderRadius: 9, border: 'none', cursor: 'pointer',
+              background: timePeriod === p ? T.card : 'transparent',
+              color: timePeriod === p ? T.tx : T.tx3,
+              fontSize: 12, fontWeight: timePeriod === p ? 700 : 500,
+              fontFamily: F,
+              boxShadow: timePeriod === p ? '0 1px 4px rgba(0,0,0,0.2)' : 'none',
+              transition: 'all 0.15s',
+            }}
+          >
+            {PERIOD_LABELS[p]}
+          </button>
+        ))}
+      </div>
+
+      {/* Donut chart — only when no category/search filter active */}
+      {timeFiltered.length > 0 && filter === 'all' && !search && (
+        <div style={{
+          background: T.card,
+          border: `1px solid ${T.bdr}`,
+          borderRadius: 20,
+          padding: '20px 16px 12px',
+          marginBottom: 14,
+        }}>
+          <DonutChart receipts={timeFiltered} periodLabel={PERIOD_LABELS[timePeriod]} />
         </div>
       )}
 
+      {/* Search */}
       <div style={{ position: 'relative', marginBottom: 10 }}>
         <input
-          placeholder={'\u641C\u7D22\u5546\u6237...'}
+          placeholder="搜索商户..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{
@@ -93,110 +431,70 @@ export default function LogView({ receipts, onDelete, onDetail }) {
             outline: 'none',
           }}
         />
-        <span
-          style={{
-            position: 'absolute',
-            left: 12,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            fontSize: 13,
-            color: T.tx3,
-          }}
-        >
-          {'\u{1F50D}'}
+        <span style={{
+          position: 'absolute', left: 12, top: '50%',
+          transform: 'translateY(-50%)', fontSize: 13, color: T.tx3,
+        }}>
+          🔍
         </span>
       </div>
-      <div
-        style={{
-          display: 'flex',
-          gap: 5,
-          overflowX: 'auto',
-          paddingBottom: 10,
-          scrollbarWidth: 'none',
-        }}
-      >
+
+      {/* Category spending pills */}
+      <div style={{
+        display: 'flex', gap: 6, overflowX: 'auto',
+        paddingBottom: 10, scrollbarWidth: 'none', marginBottom: 4,
+      }}>
         <button
           onClick={() => setFilter('all')}
           style={{
-            padding: '5px 12px',
-            borderRadius: 18,
+            padding: '6px 14px',
+            borderRadius: 20,
             whiteSpace: 'nowrap',
             flexShrink: 0,
-            background: filter === 'all' ? T.accDim : T.sf,
+            background: filter === 'all' ? T.accDim : T.sf2,
             border: `1px solid ${filter === 'all' ? T.acc : T.bdr}`,
             color: filter === 'all' ? T.acc : T.tx3,
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: 'pointer',
-            fontFamily: F,
+            fontSize: 11, fontWeight: 600,
+            cursor: 'pointer', fontFamily: F,
           }}
         >
-          {'\u5168\u90E8'}
+          全部
         </button>
-        {cats.map((c) => (
+        {catTotals.map(({ cat, total }) => (
           <button
-            key={c}
-            onClick={() => setFilter(c)}
+            key={cat}
+            onClick={() => setFilter(cat)}
             style={{
-              padding: '5px 10px',
-              borderRadius: 18,
+              padding: '6px 12px',
+              borderRadius: 20,
               whiteSpace: 'nowrap',
               flexShrink: 0,
-              background: filter === c ? `${CAT_CLR[c]}15` : T.sf,
-              border: `1px solid ${filter === c ? CAT_CLR[c] : T.bdr}`,
-              color: filter === c ? CAT_CLR[c] : T.tx3,
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: 'pointer',
-              fontFamily: F,
+              background: filter === cat ? `${CAT_CLR[cat] || T.acc}20` : T.sf2,
+              border: `1px solid ${filter === cat ? (CAT_CLR[cat] || T.acc) : T.bdr}`,
+              color: filter === cat ? (CAT_CLR[cat] || T.acc) : T.tx3,
+              fontSize: 11, fontWeight: 600,
+              cursor: 'pointer', fontFamily: F,
             }}
           >
-            {CAT_ICON[c]} {c}
+            {CAT_ICON[cat]} {cat} ${total.toFixed(2)}
           </button>
         ))}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+
+      {/* Receipt list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 4 }}>
         {filtered.length === 0 ? (
-          <div
-            style={{
-              textAlign: 'center',
-              padding: '36px',
-              color: T.tx3,
-              fontSize: 13,
-            }}
-          >
-            {'\u6682\u65E0\u5339\u914D'}
+          <div style={{ textAlign: 'center', padding: '36px', color: T.tx3, fontSize: 13 }}>
+            暂无匹配
           </div>
         ) : (
           filtered.map((r) => (
-            <div
+            <SwipeRow
               key={r.id}
-              style={{ position: 'relative', cursor: 'pointer' }}
-              onClick={() => onDetail && onDetail(r)}
-            >
-              <ReceiptRow r={r} />
-              <button
-                onClick={() => onDelete(r.id)}
-                style={{
-                  position: 'absolute',
-                  top: 6,
-                  right: 6,
-                  width: 26,
-                  height: 26,
-                  borderRadius: 7,
-                  background: 'rgba(239,68,68,0.08)',
-                  border: '1px solid rgba(239,68,68,0.2)',
-                  color: T.red,
-                  fontSize: 11,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                {'\u2715'}
-              </button>
-            </div>
+              r={r}
+              onDelete={onDelete}
+              onDetail={onDetail}
+            />
           ))
         )}
       </div>

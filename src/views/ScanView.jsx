@@ -1,327 +1,530 @@
-import { useState, useRef, useCallback } from 'react';
-import { T } from '../constants/theme';
-import { analyzeReceipt } from '../services/ai';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { T, F } from '../constants/theme';
+import { findOrCreateFolder, uploadToDriveFolder } from '../services/google';
 import Header from '../components/Header';
-import Btn from '../components/Btn';
-import Field from '../components/Field';
-import CatChips from '../components/CatChips';
-import StatusDot from '../components/StatusDot';
+import {
+  createThumbnail,
+  savePending,
+  loadPending,
+  removePending,
+  cleanStaleItems,
+  getPendingStats,
+  fmtBytes,
+  WARN_BYTES,
+  CRIT_BYTES,
+  STALE_DAYS,
+} from '../services/pendingQueue';
+import { cacheImage, rekeyCache } from '../services/imageCache';
 
-export default function ScanView({ onComplete, config: _config }) {
-  const [stage, setStage] = useState('idle');
-  const [preview, setPreview] = useState(null);
-  const [result, setResult] = useState(null);
-  const [edit, setEdit] = useState(null);
-  const [error, setError] = useState(null);
-  const fileRef = useRef(null);
+// Network check (Android; iOS Safari doesn't expose connection.type)
+function isWifi() {
+  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!conn) return true; // unknown → allow
+  const t = conn.type;
+  return !t || t === 'wifi' || t === 'ethernet' || t === 'unknown' || t === 'other';
+}
 
-  const handleFile = useCallback(async (file) => {
-    if (!file) return;
-    setError(null);
-    setStage('processing');
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      setPreview(e.target.result);
-      const [header, b64] = e.target.result.split(',');
-      const mt = header.match(/:(.*?);/)?.[1] || 'image/jpeg';
+// Animated circular progress ring
+function ProgressRing({ status }) {
+  const r = 11, c = 2 * Math.PI * r;
+  if (status === 'done') return (
+    <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'rgba(52,211,153,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <span style={{ color: T.grn, fontSize: 13, fontWeight: 800 }}>✓</span>
+    </div>
+  );
+  if (status === 'failed') return (
+    <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'rgba(248,113,113,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <span style={{ color: T.red, fontSize: 13 }}>✕</span>
+    </div>
+  );
+  if (status === 'wifi_blocked') return (
+    <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'rgba(250,204,21,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <span style={{ fontSize: 13 }}>📶</span>
+    </div>
+  );
+  // uploading / queued → spinning ring
+  return (
+    <svg width={26} height={26} viewBox="0 0 26 26" style={{ flexShrink: 0 }}>
+      <circle cx={13} cy={13} r={r} fill="none" stroke={T.bdr} strokeWidth={2.5} />
+      <circle cx={13} cy={13} r={r} fill="none" stroke={status === 'uploading' ? T.acc : T.tx3}
+        strokeWidth={2.5} strokeDasharray={`${c * 0.28} ${c}`} strokeLinecap="round"
+        style={{ transformOrigin: 'center', animation: 'spin 0.9s linear infinite' }}
+      />
+    </svg>
+  );
+}
+
+const MAX_RETRIES = 3;
+
+export default function ScanView({ onUploaded, onSync, procStatus, config }) {
+  // items: { id, name, status, retries, error, previewUrl, fromIndexedDB, fileBlob }
+  const [items, setItems] = useState([]);
+  const [storageAlert, setStorageAlert] = useState(null); // null | { level:'warn'|'crit', totalBytes, count, hasStale }
+  const filesRef = useRef({}); // id → File (in-memory during session)
+  const queueRef = useRef([]);
+  const processingRef = useRef(false);
+  const cameraRef = useRef(null);
+  const galleryRef = useRef(null);
+
+  // On mount: auto-purge stale items, load persisted queue, check storage health
+  useEffect(() => {
+    (async () => {
       try {
-        const data = await analyzeReceipt(b64, mt);
-        setResult(data);
-        setEdit({ ...data });
-        setStage('result');
-      } catch (err) {
-        setError(err.message || '\u8BC6\u522B\u5931\u8D25');
-        setStage('idle');
+        // 1. Auto-purge items older than STALE_DAYS
+        await cleanStaleItems(STALE_DAYS);
+
+        // 2. Load what's left
+        const persisted = await loadPending();
+        if (persisted.length) {
+          const restored = persisted.map(p => ({
+            id: p.id,
+            name: p.name,
+            status: 'wifi_blocked',
+            retries: 0,
+            error: 'WiFi 未连接时暂停的',
+            previewUrl: p.thumbnailBlob ? URL.createObjectURL(p.thumbnailBlob) : null,
+            fromIndexedDB: true,
+            fileBlob: p.fileBlob,
+          }));
+          setItems(prev => {
+            const existingIds = new Set(prev.map(x => x.id));
+            return [...prev, ...restored.filter(r => !existingIds.has(r.id))];
+          });
+          queueRef.current = [...queueRef.current, ...restored.filter(r =>
+            !queueRef.current.find(x => x.id === r.id)
+          )];
+        }
+
+        // 3. Check storage health
+        const stats = await getPendingStats();
+        if (stats.count > 0) {
+          const ageMs = stats.oldestAt ? Date.now() - stats.oldestAt : 0;
+          const hasStale = ageMs > 3 * 24 * 60 * 60 * 1000; // >3 days old
+          if (stats.totalBytes >= CRIT_BYTES) {
+            setStorageAlert({ level: 'crit', totalBytes: stats.totalBytes, count: stats.count, hasStale });
+          } else if (stats.totalBytes >= WARN_BYTES || hasStale) {
+            setStorageAlert({ level: 'warn', totalBytes: stats.totalBytes, count: stats.count, hasStale });
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load pending queue:', e);
       }
-    };
-    reader.readAsDataURL(file);
+    })();
   }, []);
 
-  const handleSave = () => {
-    const receipt = {
-      id: `r_${Date.now()}`,
-      ...edit,
-      amount: parseFloat(edit.amount) || 0,
-      confidence: result.confidence,
-      source: 'camera',
-      createdAt: new Date().toISOString(),
-    };
-    onComplete(receipt);
-    setStage('idle');
-    setPreview(null);
-    setResult(null);
-    setEdit(null);
-  };
+  const updateItem = useCallback((id, patch) => {
+    setItems(prev => prev.map(it => it.id === id ? { ...it, ...patch } : it));
+    queueRef.current = queueRef.current.map(it => it.id === id ? { ...it, ...patch } : it);
+    // Auto-dismiss done items after 2s
+    if (patch.status === 'done') {
+      setTimeout(() => {
+        setItems(prev => prev.filter(it => it.id !== id || it.status !== 'done'));
+        queueRef.current = queueRef.current.filter(it => it.id !== id);
+      }, 2000);
+    }
+  }, []);
 
-  const reset = () => {
-    setStage('idle');
-    setPreview(null);
-    setResult(null);
-    setEdit(null);
-    setError(null);
-  };
+  const processQueue = useCallback(async (inboxFolder) => {
+    if (processingRef.current) return;
+    processingRef.current = true;
+    let uploadedAny = false;
+
+    while (true) {
+      const pending = queueRef.current.find(it => it.status === 'queued');
+      if (!pending) break;
+
+      // WiFi-only check
+      if (config?.wifiOnlyUpload && !isWifi()) {
+        // Block all queued items
+        queueRef.current
+          .filter(it => it.status === 'queued')
+          .forEach(it => updateItem(it.id, { status: 'wifi_blocked', error: '' }));
+        break;
+      }
+
+      updateItem(pending.id, { status: 'uploading' });
+
+      const file = filesRef.current[pending.id] || pending.fileBlob;
+      let success = false;
+      let lastError = '';
+
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '-' +
+            Math.random().toString(36).slice(2, 5);
+          const ext = (file.type || '').includes('png') ? 'png' : 'jpg';
+          const fileName = `receipt_${ts}.${ext}`;
+          const folderId = await findOrCreateFolder(inboxFolder);
+          const uploaded = await uploadToDriveFolder(file, fileName, folderId, file.type || 'image/jpeg');
+          // Rekey image cache: temp id → Drive file id (so ReviewView can find it)
+          if (uploaded?.id) {
+            rekeyCache(pending.id, uploaded.id).catch(() => {});
+          }
+          success = true;
+          break;
+        } catch (err) {
+          lastError = err.message;
+          if (attempt < MAX_RETRIES - 1) {
+            updateItem(pending.id, { retries: attempt + 1 });
+            await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+          }
+        }
+      }
+
+      if (success) {
+        updateItem(pending.id, { status: 'done' });
+        uploadedAny = true;
+        // Remove from IndexedDB if it was persisted
+        if (pending.fromIndexedDB) {
+          try { await removePending(pending.id); } catch {}
+        }
+      } else {
+        updateItem(pending.id, { status: 'failed', error: lastError });
+      }
+    }
+
+    processingRef.current = false;
+    if (uploadedAny) {
+      onUploaded?.();
+      // Re-check storage health after uploads complete
+      const stats = await getPendingStats();
+      if (stats.count === 0) setStorageAlert(null);
+    }
+  }, [config, updateItem, onUploaded]);
+
+  const handleFiles = useCallback(async (fileList) => {
+    if (!fileList?.length) return;
+    const files = Array.from(fileList);
+    const inboxFolder = config?.inboxFolder || 'Inbox';
+    const wifiOnly = config?.wifiOnlyUpload && !isWifi();
+
+    const newItems = await Promise.all(files.map(async (file) => {
+      const id = Math.random().toString(36).slice(2) + Date.now();
+      const thumbBlob = await createThumbnail(file);
+      const previewUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : URL.createObjectURL(file);
+      filesRef.current[id] = file;
+      // Cache original image blob for ReviewView lightbox
+      cacheImage(id, file).catch(() => {});
+
+      const item = {
+        id, name: file.name || 'receipt.jpg',
+        status: wifiOnly ? 'wifi_blocked' : 'queued',
+        retries: 0, error: '',
+        previewUrl, fromIndexedDB: false, fileBlob: file,
+      };
+
+      // Persist wifi-blocked items to IndexedDB
+      if (wifiOnly) {
+        try {
+          await savePending({ id, name: item.name, fileBlob: file, thumbnailBlob: thumbBlob, addedAt: Date.now() });
+        } catch (e) { console.warn('Failed to persist pending item:', e); }
+      }
+
+      return item;
+    }));
+
+    setItems(prev => [...prev, ...newItems]);
+    queueRef.current = [...queueRef.current, ...newItems];
+    if (!wifiOnly) processQueue(inboxFolder);
+  }, [config, processQueue]);
+
+  const retryAll = useCallback(async () => {
+    const failed = queueRef.current.filter(it =>
+      it.status === 'failed' || it.status === 'wifi_blocked'
+    );
+    // Re-persist wifi-blocked items that need to upload now
+    for (const it of failed) {
+      if (it.fromIndexedDB) {
+        // Already in IndexedDB, just update status
+        updateItem(it.id, { status: 'queued', error: '', fromIndexedDB: false });
+      } else {
+        updateItem(it.id, { status: 'queued', error: '' });
+      }
+    }
+    processQueue(config?.inboxFolder || 'Inbox');
+  }, [config, updateItem, processQueue]);
+
+  const clearDone = useCallback(() => {
+    const remaining = queueRef.current.filter(it => it.status !== 'done');
+    // Revoke object URLs for done items
+    queueRef.current.filter(it => it.status === 'done').forEach(it => {
+      if (it.previewUrl) URL.revokeObjectURL(it.previewUrl);
+      delete filesRef.current[it.id];
+    });
+    setItems(remaining);
+    queueRef.current = remaining;
+  }, []);
+
+  const isConnected = Boolean(config?.connected);
+  const wifiBlockedItems = items.filter(it => it.status === 'wifi_blocked');
+  const pendingCount = items.filter(it => it.status === 'queued' || it.status === 'uploading').length;
+  const failedCount = items.filter(it => it.status === 'failed').length;
+  const doneCount = items.filter(it => it.status === 'done').length;
+
+  if (!isConnected) {
+    return (
+      <div style={{ padding: '0 16px 100px' }}>
+        <Header title="扫描小票" sub="请先在设置中连接 Google" />
+        <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🔗</div>
+          <div style={{ fontSize: 14, color: T.tx2 }}>请先完成 Google 账号连接</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: '0 16px 100px' }}>
-      <Header
-        title={'\u626B\u63CF\u5C0F\u7968'}
-        sub={
-          '\u62CD\u7167\u6216\u9009\u62E9\u56FE\u7247\uFF0CAI \u81EA\u52A8\u63D0\u53D6'
-        }
-      />
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={(e) => handleFile(e.target.files?.[0])}
-      />
+      <Header title="扫描小票" sub={`存至 Drive / ${config?.inboxFolder || 'Inbox'}`} />
 
-      {stage === 'idle' && (
-        <div style={{ animation: 'fadeUp 0.3s ease' }}>
-          <button
-            onClick={() => {
-              fileRef.current?.setAttribute('capture', 'environment');
-              fileRef.current?.click();
-            }}
-            style={{
-              width: '100%',
-              padding: '44px 20px',
-              background: T.card,
-              border: `2px dashed ${T.bdr2}`,
-              borderRadius: 20,
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 10,
-              marginBottom: 10,
-            }}
-          >
-            <div
-              style={{
-                width: 56,
-                height: 56,
-                borderRadius: 14,
-                background: T.accDim,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 28,
-              }}
-            >
-              {'\u{1F4F7}'}
-            </div>
-            <span
-              style={{
-                fontSize: 15,
-                fontWeight: 700,
-                color: T.tx,
-                fontFamily: 'inherit',
-              }}
-            >
-              {'\u62CD\u7167\u8BC6\u522B'}
-            </span>
-          </button>
-          <button
-            onClick={() => {
-              fileRef.current?.removeAttribute('capture');
-              fileRef.current?.click();
-            }}
-            style={{
-              width: '100%',
-              padding: '14px',
-              background: T.card,
-              border: `1px solid ${T.bdr}`,
-              borderRadius: 13,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-            }}
-          >
-            <span style={{ fontSize: 16 }}>{'\u{1F5BC}\uFE0F'}</span>
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                color: T.tx2,
-                fontFamily: 'inherit',
-              }}
-            >
-              {'\u4ECE\u76F8\u518C\u9009\u62E9'}
-            </span>
-          </button>
-          {error && (
-            <div
-              style={{
-                marginTop: 14,
-                padding: '12px',
-                background: 'rgba(239,68,68,0.08)',
-                border: '1px solid rgba(239,68,68,0.25)',
-                borderRadius: 11,
-                color: T.red,
-                fontSize: 12,
-                textAlign: 'center',
-              }}
-            >
-              {error}
-            </div>
-          )}
-        </div>
-      )}
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+        onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }} />
+      <input ref={galleryRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
+        onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }} />
 
-      {stage === 'processing' && (
-        <div
-          style={{
-            textAlign: 'center',
-            padding: '32px 0',
-            animation: 'fadeUp 0.3s ease',
-          }}
-        >
-          {preview && (
-            <div
+      {/* WiFi-blocked pending queue — prominent banner */}
+      {wifiBlockedItems.length > 0 && (
+        <div style={{
+          background: 'rgba(250,204,21,0.07)', border: '1px solid rgba(250,204,21,0.25)',
+          borderRadius: 16, padding: '14px', marginBottom: 14,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: T.acc }}>
+                📶 {wifiBlockedItems.length} 张等待 WiFi 上传
+              </div>
+              <div style={{ fontSize: 11, color: T.tx3, marginTop: 2 }}>
+                连上 WiFi 后点"立即上传"，照片已安全存储在本地
+              </div>
+            </div>
+            <button
+              onClick={retryAll}
               style={{
-                marginBottom: 20,
-                borderRadius: 14,
-                overflow: 'hidden',
-                border: `1px solid ${T.bdr}`,
-                maxHeight: 180,
+                flexShrink: 0, padding: '7px 13px',
+                background: T.acc, border: 'none', borderRadius: 20,
+                color: '#000', fontSize: 12, fontWeight: 800, cursor: 'pointer',
               }}
             >
-              <img
-                src={preview}
-                style={{ width: '100%', objectFit: 'cover', display: 'block' }}
-                alt=""
-              />
-            </div>
-          )}
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              border: `3px solid ${T.bdr}`,
-              borderTopColor: T.acc,
-              borderRadius: '50%',
-              animation: 'spin 0.8s linear infinite',
-              margin: '0 auto 14px',
-            }}
-          />
-          <div style={{ fontSize: 15, fontWeight: 700, color: T.tx }}>
-            {'AI \u8BC6\u522B\u4E2D...'}
+              立即上传
+            </button>
           </div>
-          <div style={{ fontSize: 11, color: T.tx3, marginTop: 4 }}>
-            {
-              '\u63D0\u53D6\u65E5\u671F\u3001\u5546\u6237\u3001\u91D1\u989D\u3001\u5206\u7C7B'
-            }
+          {/* Thumbnail strip */}
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', scrollbarWidth: 'none' }}>
+            {wifiBlockedItems.map(it => (
+              <div key={it.id} style={{ flexShrink: 0, position: 'relative' }}>
+                {it.previewUrl ? (
+                  <img src={it.previewUrl} alt="" style={{
+                    width: 64, height: 64, borderRadius: 10, objectFit: 'cover',
+                    border: `1px solid rgba(250,204,21,0.3)`,
+                  }} />
+                ) : (
+                  <div style={{
+                    width: 64, height: 64, borderRadius: 10,
+                    background: T.sf2, display: 'flex', alignItems: 'center',
+                    justifyContent: 'center', fontSize: 20,
+                  }}>🧾</div>
+                )}
+                <div style={{
+                  position: 'absolute', bottom: 3, right: 3,
+                  width: 16, height: 16, borderRadius: '50%',
+                  background: 'rgba(250,204,21,0.9)', fontSize: 8,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>⏸</div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {stage === 'result' && edit && (
-        <div style={{ animation: 'fadeUp 0.3s ease' }}>
-          {preview && (
-            <div
-              style={{
-                marginBottom: 14,
-                borderRadius: 14,
-                overflow: 'hidden',
-                border: `1px solid ${T.bdr}`,
-                maxHeight: 140,
-              }}
-            >
-              <img
-                src={preview}
-                style={{ width: '100%', objectFit: 'cover', display: 'block' }}
-                alt=""
-              />
-            </div>
-          )}
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              marginBottom: 14,
-              padding: '8px 12px',
-              background: T.card,
-              borderRadius: 10,
-              border: `1px solid ${T.bdr}`,
-            }}
-          >
-            <StatusDot
-              level={
-                (result.confidence || 0) >= 75
-                  ? 'ok'
-                  : (result.confidence || 0) >= 50
-                    ? 'warn'
-                    : 'err'
-              }
-            />
-            <span style={{ fontSize: 11, color: T.tx2 }}>
-              {'\u7F6E\u4FE1\u5EA6'} {result.confidence}%
+      {/* Storage health alert */}
+      {storageAlert && (
+        <div style={{
+          borderRadius: 14, padding: '12px 14px', marginBottom: 12,
+          background: storageAlert.level === 'crit'
+            ? 'rgba(248,113,113,0.08)' : 'rgba(251,146,60,0.08)',
+          border: `1px solid ${storageAlert.level === 'crit'
+            ? 'rgba(248,113,113,0.3)' : 'rgba(251,146,60,0.3)'}`,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <span style={{ fontSize: 18, flexShrink: 0 }}>
+              {storageAlert.level === 'crit' ? '🚨' : '⚠️'}
             </span>
-            {(result.confidence || 0) < 60 && (
-              <span style={{ fontSize: 10, color: T.acc, marginLeft: 'auto' }}>
-                {'\u5EFA\u8BAE\u6838\u5BF9'}
-              </span>
-            )}
-          </div>
-
-          <Field
-            label={'\u65E5\u671F'}
-            icon={'\u{1F4C5}'}
-            value={edit.date}
-            onChange={(v) => setEdit((d) => ({ ...d, date: v }))}
-            type="date"
-          />
-          <Field
-            label={'\u5546\u6237'}
-            icon={'\u{1F3EA}'}
-            value={edit.merchant}
-            onChange={(v) => setEdit((d) => ({ ...d, merchant: v }))}
-          />
-          <Field
-            label={'\u91D1\u989D'}
-            icon={'\u{1F4B0}'}
-            value={edit.amount}
-            onChange={(v) => setEdit((d) => ({ ...d, amount: v }))}
-            type="number"
-            mono
-          />
-          <div style={{ marginBottom: 12 }}>
-            <label
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: T.tx3,
-                letterSpacing: '1px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                marginBottom: 6,
-              }}
-            >
-              {'\u{1F3F7}\uFE0F \u5206\u7C7B'}
-            </label>
-            <CatChips
-              value={edit.category}
-              onChange={(v) => setEdit((d) => ({ ...d, category: v }))}
-            />
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
-            <Btn full onClick={reset} style={{ flex: 1 }}>
-              {'\u53D6\u6D88'}
-            </Btn>
-            <Btn primary full onClick={handleSave} style={{ flex: 2 }}>
-              {'\u4FDD\u5B58 \u2713'}
-            </Btn>
+            <div style={{ flex: 1 }}>
+              <div style={{
+                fontSize: 13, fontWeight: 700,
+                color: storageAlert.level === 'crit' ? T.red : '#fb923c',
+                marginBottom: 4,
+              }}>
+                {storageAlert.level === 'crit'
+                  ? `本地缓存快满了（${fmtBytes(storageAlert.totalBytes)}）`
+                  : `本地缓存了 ${storageAlert.count} 张照片（约 ${fmtBytes(storageAlert.totalBytes)}）`}
+              </div>
+              <div style={{ fontSize: 11, color: T.tx2, lineHeight: 1.5 }}>
+                {storageAlert.level === 'crit'
+                  ? '已接近浏览器存储上限，新照片可能无法保存。请尽快上传或清理缓存。'
+                  : storageAlert.hasStale
+                    ? '有照片已等待超过 3 天，建议尽快处理，避免数据丢失。'
+                    : '照片保存在本地，建议尽快连 WiFi 上传。'}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button
+                  onClick={retryAll}
+                  style={{
+                    fontSize: 11, fontWeight: 700, padding: '5px 12px',
+                    borderRadius: 20, border: 'none', cursor: 'pointer',
+                    background: storageAlert.level === 'crit' ? T.red : '#fb923c',
+                    color: '#fff',
+                  }}
+                >
+                  📱 用流量立即上传
+                </button>
+                <button
+                  onClick={() => setStorageAlert(null)}
+                  style={{
+                    fontSize: 11, color: T.tx3, background: 'none',
+                    border: `1px solid ${T.bdr}`, borderRadius: 20,
+                    padding: '5px 12px', cursor: 'pointer',
+                  }}
+                >
+                  稍后处理
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
+
+      {/* Main camera card */}
+      <button
+        onClick={() => cameraRef.current?.click()}
+        style={{
+          width: '100%', padding: '52px 20px', marginBottom: 12,
+          background: 'linear-gradient(135deg, rgba(250,204,21,0.14) 0%, rgba(250,204,21,0.02) 100%)',
+          border: '1px solid rgba(250,204,21,0.22)', borderRadius: 24, cursor: 'pointer',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+          transition: 'opacity 0.15s ease',
+        }}
+        onTouchStart={e => e.currentTarget.style.opacity = '0.8'}
+        onTouchEnd={e => e.currentTarget.style.opacity = '1'}
+      >
+        <span style={{ fontSize: 54, lineHeight: 1 }}>📷</span>
+        <span style={{ fontSize: 20, fontWeight: 700, color: T.tx, fontFamily: F }}>拍张照片</span>
+        <span style={{ fontSize: 12, color: T.tx2, fontFamily: F }}>照片即存 Drive，AI 自动识别</span>
+        {pendingCount > 0 && (
+          <span style={{ fontSize: 11, color: T.acc, background: T.accDim, borderRadius: 20, padding: '3px 10px' }}>
+            上传中 {pendingCount} 张…
+          </span>
+        )}
+      </button>
+
+      {/* Gallery pill */}
+      <button
+        onClick={() => galleryRef.current?.click()}
+        style={{
+          width: '100%', padding: '12px 20px', marginBottom: 14,
+          background: T.card, border: `1px solid ${T.bdr}`,
+          borderRadius: 50, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}
+      >
+        <span style={{ fontSize: 16 }}>🖼️</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: T.tx2, fontFamily: F }}>
+          从相册选择 · 支持多张
+        </span>
+      </button>
+
+      {/* Upload status list — only show when there are items (excluding wifi-blocked which have their own section) */}
+      {items.filter(it => it.status !== 'wifi_blocked').length > 0 && (
+        <div style={{
+          background: T.card, border: `1px solid ${T.bdr}`,
+          borderRadius: 16, padding: '12px 14px', marginBottom: 14,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: T.tx3, letterSpacing: '1px' }}>
+              上传队列
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {failedCount > 0 && (
+                <button onClick={retryAll} style={{ fontSize: 11, color: T.acc, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>
+                  ↩ 重试
+                </button>
+              )}
+              {doneCount > 0 && (
+                <button onClick={clearDone} style={{ fontSize: 11, color: T.tx3, background: 'none', border: 'none', cursor: 'pointer' }}>
+                  清除已完成
+                </button>
+              )}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {items.filter(it => it.status !== 'wifi_blocked').map(it => (
+              <div key={it.id} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '8px 10px', borderRadius: 12,
+                background: it.status === 'failed' ? 'rgba(248,113,113,0.06)'
+                  : it.status === 'done' ? 'rgba(52,211,153,0.06)' : T.sf2,
+              }}>
+                {/* Thumbnail */}
+                {it.previewUrl ? (
+                  <img src={it.previewUrl} alt="" style={{
+                    width: 44, height: 44, borderRadius: 9, objectFit: 'cover', flexShrink: 0,
+                    border: `1px solid ${T.bdr}`,
+                  }} />
+                ) : (
+                  <div style={{
+                    width: 44, height: 44, borderRadius: 9, background: T.sf,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0,
+                  }}>🧾</div>
+                )}
+                {/* Info */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: T.tx, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {it.name}
+                  </div>
+                  <div style={{ fontSize: 10, color: it.status === 'failed' ? T.red : T.tx3, marginTop: 2 }}>
+                    {it.status === 'done' && '✅ 已上传到 Drive'}
+                    {it.status === 'uploading' && `上传中${it.retries > 0 ? `（第 ${it.retries + 1} 次重试）` : '…'}`}
+                    {it.status === 'queued' && '等待上传…'}
+                    {it.status === 'failed' && `失败：${it.error || '网络错误'}`}
+                  </div>
+                </div>
+                {/* Progress ring */}
+                <ProgressRing status={it.status} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Drive sync — compact inline button */}
+      <button
+        onClick={() => { if (!procStatus?.processing) onSync?.(); }}
+        disabled={procStatus?.processing}
+        style={{
+          width: '100%', padding: '10px 16px',
+          background: 'none',
+          border: `1px dashed ${T.bdr2}`,
+          borderRadius: 12, cursor: procStatus?.processing ? 'not-allowed' : 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          color: T.tx3, fontSize: 12, fontFamily: F,
+          transition: 'all 0.15s',
+        }}
+        onMouseEnter={e => { if (!procStatus?.processing) e.currentTarget.style.borderColor = T.acc; }}
+        onMouseLeave={e => e.currentTarget.style.borderColor = T.bdr2}
+      >
+        <>
+          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
+            style={{ opacity: procStatus?.processing ? 0.3 : 1 }}>
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <span style={{ opacity: procStatus?.processing ? 0.4 : 1 }}>
+            在电脑上传了小票？点此同步 Drive
+          </span>
+        </>
+      </button>
     </div>
   );
 }

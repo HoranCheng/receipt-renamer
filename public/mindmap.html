@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Receipt Renamer — 功能脑图</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e4e4e7; height: 100vh; display: flex; flex-direction: column; }
+.toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #18181b; border-bottom: 1px solid #333; flex-shrink: 0; }
+.toolbar h1 { font-size: 15px; font-weight: 700; color: #facc15; }
+.toolbar button { background: #27272a; border: 1px solid #444; color: #e4e4e7; padding: 5px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; }
+.toolbar button:hover { background: #3f3f46; }
+.toolbar .sep { flex: 1; }
+.main { display: flex; flex: 1; min-height: 0; }
+.editor-pane { width: 420px; display: flex; flex-direction: column; border-right: 1px solid #333; background: #1a1a1e; flex-shrink: 0; }
+.editor-pane.hidden { display: none; }
+.editor-pane textarea { flex: 1; resize: none; background: #1a1a1e; color: #d4d4d8; border: none; padding: 16px; font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.7; outline: none; tab-size: 2; }
+.map-pane { flex: 1; position: relative; }
+#mindmap { width: 100%; height: 100%; }
+.hint { position: absolute; bottom: 12px; right: 16px; font-size: 11px; color: #666; }
+@media (max-width: 800px) {
+  .editor-pane { width: 100%; height: 40%; border-right: none; border-bottom: 1px solid #333; }
+  .main { flex-direction: column; }
+}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <h1>🧾 Receipt Renamer 功能脑图</h1>
+  <div class="sep"></div>
+  <button id="toggleBtn" onclick="toggleEditor()">隐藏编辑器</button>
+  <button onclick="fitMap()">适应屏幕</button>
+  <button onclick="downloadMd()">导出 .md</button>
+</div>
+
+<div class="main">
+  <div class="editor-pane" id="editorPane">
+    <textarea id="mdInput" spellcheck="false"></textarea>
+  </div>
+  <div class="map-pane">
+    <svg id="mindmap"></svg>
+    <div class="hint">编辑左侧 Markdown → 脑图实时更新 · 缩进代表层级</div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/markmap-view@0.15"></script>
+<script src="https://cdn.jsdelivr.net/npm/markmap-lib@0.15"></script>
+
+<script>
+const DEFAULT_MD = `# Receipt Renamer
+## 📷 拍照识别（核心）
+### 拍照 / 相册选取
+- 单张拍照
+- 批量选择多张
+### AI 识别（Gemini 2.5 Flash）
+- 日期提取
+- 商家识别（具体品牌名）
+- 金额识别
+- 货币识别
+- 分类识别
+  - 杂货 Grocery
+  - 餐饮 Dining
+  - 加油 Fuel
+  - 医疗 Medical
+  - 五金园艺 Hardware & Garden
+  - 户外露营 Outdoor & Camping
+  - 交通 Transport
+  - 水电 Utilities
+  - 娱乐 Entertainment
+  - 购物 Shopping
+  - 教育 Education
+  - 保险 Insurance
+  - 订阅 Subscription
+  - 其他 Other
+- 置信度评分
+- 是否为小票判断
+### 自动重命名
+- 格式: YYYY.MM.DD MerchantName Amount.ext
+- Title Case 商家名
+## ☁️ Google Drive 存储
+### 文件夹结构
+- Receipt Renamer/（根文件夹）
+  - 小票待处理（Inbox）
+  - 小票已存档（Validated）
+  - 小票待确认（Review）
+  - 非小票图片（Not Receipt）
+### 文件操作
+- 上传到 Inbox
+- 高置信度 → 自动归档
+- 低置信度 → 待确认
+- 非小票 → 非小票文件夹
+- 重命名 + 移动
+- 删除（Drive Trash）
+### 文件夹管理
+- 自定义文件夹名
+- 在线重命名（不迁移文件）
+## 📊 Google Sheets 记录
+### 自动记录
+- 日期 / 商家 / 分类
+- 金额 / 货币
+- Drive 文件链接
+### 自动创建表格
+- 创建在 Receipt Renamer 文件夹内
+- 表头自动写入
+## ⚠️ 审核系统
+### 待审列表
+- 显示 AI 置信度
+- 显示审核原因
+- 缩略图预览
+### 审核详情页
+- 图片预览（4:3 容器）
+- 点击查看原图（全屏 Lightbox）
+  - 双击放大 2.5x
+  - 两指捏合缩放（最大 5x）
+  - 单指拖动平移
+  - 全屏适配各种手机尺寸
+- 编辑 AI 预填信息
+  - 日期 / 商家 / 金额 / 分类
+- 通过 → 归档 + 记录到 Sheets
+- 删除 → Drive 删除 + 清理缓存
+### 非小票处理
+- AI 标记为非小票
+- 弹窗提醒（含缩略图）
+- 三级操作：删除 / 推迟 / 手动归档
+## 🔄 异步处理
+### 火即忘上传
+- 拍照后立即返回相机
+- 后台上传 + AI 处理
+### 上传队列
+- 多文件并行管理
+- 失败自动重试（最多 3 次）
+- 状态追踪（排队/上传中/完成/失败）
+### 处理指示器
+- 底部浮动胶囊
+- "AI 识别中…" / "AI 识别中 · 共 X 张"
+### WiFi-Only 模式
+- 蜂窝网络下暂停上传
+- IndexedDB 持久化待上传队列
+- WiFi 恢复后自动续传
+## 📱 本地缓存
+### IndexedDB 待上传队列
+- 文件 Blob 持久化
+- 缩略图持久化
+- 跨刷新存活
+### IndexedDB 图片缓存
+- 拍照时缓存原图
+- 上传后重新绑定 Drive ID
+- 审核页原图秒开
+- 归档/删除后自动清理
+### 存储管理
+- 20MB 黄色警告
+- 45MB 红色警告
+- 14 天自动清理过期项
+## 📈 记录 & 统计
+### 甜甜圈图表
+- 按分类显示占比
+- 中心显示总数
+### 时间筛选
+- 本周 / 本月 / 全部
+### 滑动操作
+- 左滑删除记录
+- 触觉反馈
+### 导出
+- CSV 导出
+- JSON 导出
+## 🔐 认证 & 安全
+### Google OAuth 登录
+- 共享 Client ID（无需用户配置）
+- 静默令牌刷新
+- Session 持久化（sessionStorage）
+- "记住我" 选项（localStorage）
+### Cloudflare Worker 代理
+- API Key 服务端保管
+- 每用户每日配额（KV 存储）
+- CORS 安全
+## ⚙️ 设置
+### 基础设置
+- WiFi-Only 上传开关
+### 高级设置（折叠面板）
+- 自定义文件夹名
+- 在线重命名文件夹
+### 账户管理
+- Google 个人资料卡片
+- 登出
+- 创建/链接 Sheets
+## 🎨 UI/UX
+### 深色主题
+- 背景 #18181B
+- 强调色 #FACC15
+### 动画
+- 上传项淡入
+- 完成项自动消失（2s）
+- 机器人动画（加载/空状态）
+### 触觉反馈
+- 滑动删除震动
+### 导航
+- 4 标签：扫描 / 待审 / 记录 / 设置
+- SVG 图标（Feather 风格）
+- 页面状态 sessionStorage 持久化
+### 响应式
+- 适配各种手机屏幕
+- PWA 支持
+`;
+
+let md = DEFAULT_MD;
+const textarea = document.getElementById('mdInput');
+textarea.value = md;
+
+const { Transformer } = markmap;
+const { Markmap } = markmap;
+const transformer = new Transformer();
+
+const svg = document.getElementById('mindmap');
+const mm = Markmap.create(svg, {
+  color: (node) => {
+    const colors = ['#facc15','#38bdf8','#a78bfa','#fb923c','#34d399','#f472b6','#60a5fa','#fbbf24'];
+    return colors[node.state?.depth % colors.length] || '#facc15';
+  },
+  paddingX: 16,
+  autoFit: true,
+  duration: 300,
+});
+
+function renderMap() {
+  const { root } = transformer.transform(textarea.value);
+  mm.setData(root);
+  mm.fit();
+}
+
+renderMap();
+
+let debounce;
+textarea.addEventListener('input', () => {
+  clearTimeout(debounce);
+  debounce = setTimeout(renderMap, 400);
+});
+
+function toggleEditor() {
+  const pane = document.getElementById('editorPane');
+  const btn = document.getElementById('toggleBtn');
+  pane.classList.toggle('hidden');
+  btn.textContent = pane.classList.contains('hidden') ? '显示编辑器' : '隐藏编辑器';
+  setTimeout(() => mm.fit(), 100);
+}
+
+function fitMap() {
+  mm.fit();
+}
+
+function downloadMd() {
+  const blob = new Blob([textarea.value], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'receipt-renamer-mindmap.md';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// Handle tab key in textarea
+textarea.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
+    textarea.selectionStart = textarea.selectionEnd = start + 2;
+    clearTimeout(debounce);
+    debounce = setTimeout(renderMap, 400);
+  }
+});
+</script>
+</body>
+</html>

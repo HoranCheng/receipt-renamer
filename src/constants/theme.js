@@ -1,20 +1,22 @@
 export const T = {
-  bg: '#08080b',
-  sf: '#111116',
-  sf2: '#191920',
-  card: '#14141a',
-  bdr: '#252530',
-  bdr2: '#35354a',
-  tx: '#eae8e4',
-  tx2: '#8b8b9a',
-  tx3: '#55556a',
-  acc: '#e8b931',
-  accDim: 'rgba(232,185,49,0.10)',
-  accGlow: 'rgba(232,185,49,0.25)',
-  red: '#ef4444',
-  grn: '#34d399',
-  blue: '#60a5fa',
+  bg: '#18181B',
+  sf: '#1C1C1F',
+  sf2: '#232329',
+  card: '#27272A',
+  bdr: '#3F3F46',
+  bdr2: '#52525B',
+  tx: '#FAFAFA',
+  tx2: '#A1A1AA',
+  tx3: '#71717A',
+  acc: '#FACC15',
+  accDim: 'rgba(250,204,21,0.12)',
+  accGlow: 'rgba(250,204,21,0.28)',
+  red: '#F87171',
+  grn: '#34D399',
+  blue: '#60A5FA',
+  orange: '#FB923C',
+  purple: '#A78BFA',
 };
 
 export const F = `'Libre Franklin','Noto Sans SC',system-ui,sans-serif`;
-export const FM = `'IBM Plex Mono','SF Mono',monospace`;
+export const FM = `'IBM Plex Mono','SF Mono','Courier New',monospace`;

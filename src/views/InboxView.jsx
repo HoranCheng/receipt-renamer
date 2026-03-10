@@ -78,8 +78,11 @@ export default function InboxView({ config, onProcessed }) {
       const isPdf = file.mimeType.includes('pdf');
       const data = await analyzeReceipt(base64, mt, isPdf ? 'pdf' : 'image');
 
-      const ext = file.name.split('.').pop();
-      const newName = `${data.date || 'unknown'} ${data.category || 'Other'} ${data.merchant || 'Unknown'}.${ext}`;
+      const ext = file.name.split('.').pop() || 'jpg';
+      const safeDate = (data.date || 'unknown-date').replace(/-/g, '.');
+      const safeCategory = (data.category || 'Other').replace(/[/\\?%*:|"<>]/g, '-');
+      const safeAmount = parseFloat(data.amount || 0).toFixed(2);
+      const newName = `${safeDate} ${safeCategory} ${safeAmount}.${ext}`;
       const conf = data.confidence || 0;
       const targetFolder =
         conf >= 70 ? validIdRef.current : reviewIdRef.current;

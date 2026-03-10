@@ -1,10 +1,45 @@
 import { CATEGORIES } from '../constants';
 
-const API_BASE =
-  import.meta.env.VITE_AI_PROXY_URL || 'https://api.anthropic.com';
+const PROXY_URL = import.meta.env.VITE_AI_PROXY_URL || '';
 const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || '';
 
-export async function analyzeReceipt(base64, mediaType, fileType = 'image') {
+// ─── Proxy mode (Gemini 2.0 Flash via receipt-proxy Worker) ──────────────────
+
+async function analyzeViaProxy(base64, mediaType, fileType) {
+  const uid = localStorage.getItem('receipt_google_uid') || 'anonymous';
+
+  const res = await fetch(`${PROXY_URL}/api/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uid, base64, mediaType, fileType }),
+  });
+
+  if (res.status === 429) {
+    throw new Error('今日识别额度已用完（100张/天），请明日再试或联系管理员申请额外额度');
+  }
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    let detail = errBody;
+    try {
+      const parsed = JSON.parse(errBody);
+      detail = parsed.message || parsed.error || errBody;
+    } catch {
+      // Use raw error body
+    }
+    throw new Error(`代理识别失败 (${res.status}): ${detail || res.statusText}`);
+  }
+
+  const data = await res.json();
+
+  // Strip _quota metadata before returning receipt data
+  const { _quota, ...receiptData } = data;
+  return receiptData;
+}
+
+// ─── Direct mode (Anthropic Claude, legacy) ───────────────────────────────────
+
+async function analyzeViaDirect(base64, mediaType, fileType) {
   const prompt = `You are a receipt data extractor for an Australian user. Analyze this receipt and extract structured data.
 
 RULES:
@@ -23,13 +58,12 @@ Respond ONLY with this JSON, no markdown, no backticks:
     'anthropic-version': '2023-06-01',
   };
 
-  // Add auth header — direct browser mode or proxy mode
   if (API_KEY) {
     headers['x-api-key'] = API_KEY;
     headers['anthropic-dangerous-direct-browser-access'] = 'true';
   }
 
-  const res = await fetch(`${API_BASE}/v1/messages`, {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -87,4 +121,13 @@ Respond ONLY with this JSON, no markdown, no backticks:
   } catch {
     throw new Error(`AI 返回了无法解析的内容: ${text.slice(0, 100)}`);
   }
+}
+
+// ─── Public API (signature unchanged) ────────────────────────────────────────
+
+export async function analyzeReceipt(base64, mediaType, fileType = 'image') {
+  if (PROXY_URL) {
+    return analyzeViaProxy(base64, mediaType, fileType);
+  }
+  return analyzeViaDirect(base64, mediaType, fileType);
 }
