@@ -424,14 +424,12 @@ export async function renameAndMoveFile(fileId, newName, targetFolderId, current
   });
 }
 
-/** Permanently delete a file from Drive (sends to trash) */
+/** Move a file to Google Drive trash (recoverable) */
 export async function deleteFile(fileId) {
-  const token = await ensureToken();
-  const res = await fetch(`${DRIVE_API}/files/${fileId}/trash`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+  return driveReq('PATCH', `/files/${fileId}`, {
+    body: { trashed: true },
+    params: { fields: 'id,trashed' },
   });
-  if (!res.ok) throw new Error(`Delete failed (${res.status})`);
 }
 
 export async function updateFileMetadata(fileId, updates) {
