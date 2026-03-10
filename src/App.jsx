@@ -10,6 +10,8 @@ import {
   setLoginHint,
   signOut,
   getAccessToken,
+  readCloudConfig,
+  saveCloudConfig,
 } from './services/google';
 import { processInboxBackground, getSavedProgress } from './services/processor';
 import { sendTokenToSW, onSWMessage, resumeSWProcessing } from './services/swBridge';
@@ -49,6 +51,7 @@ export default function App() {
   const [procStatus, setProcStatus] = useState(null); // { processing, current, total, done, failed }
   const [authLoading, setAuthLoading] = useState(false);
   const [reviewCount, setReviewCount] = useState(0); // T-014: badge for review tab
+  const [configConflict, setConfigConflict] = useState(null); // { cloud, local, fields[] }
 
   useEffect(() => {
     (async () => {
@@ -62,7 +65,7 @@ export default function App() {
       setReady(true);
       if (effectiveClientId && mergedConfig.setupDone) {
         // Load Google API scripts in background — don't block UI
-        initGoogleAPI(effectiveClientId).then(() => {
+        initGoogleAPI(effectiveClientId).then(async () => {
           if (mergedConfig.connected) {
             const email = mergedConfig.googleProfile?.email;
             if (email) setLoginHint(email);
@@ -70,18 +73,20 @@ export default function App() {
             // Try restoring saved token (instant, no network, no UI)
             const restored = tryRestoreSession();
             if (!restored) {
-              // Token expired — try ONE silent refresh in background
-              // prompt: '' means no popup IF user has active Google session
-              requestAccessToken({
-                prompt: '',
-                loginHint: email,
-                persistent: mergedConfig.rememberMe,
-              }).catch(() => {
-                // Silent refresh failed — user will need to re-auth on next action
-                // Don't show any loading screen here
+              try {
+                await requestAccessToken({
+                  prompt: '',
+                  loginHint: email,
+                  persistent: mergedConfig.rememberMe,
+                });
+              } catch {
                 console.info('Silent token refresh failed — will prompt on next action');
-              });
+                return;
+              }
             }
+
+            // Token available — sync cloud config
+            syncCloudConfig(mergedConfig);
           }
         }).catch(() => {
           console.warn('Google API init skipped on startup');
@@ -170,6 +175,71 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [config]);
 
+  // Cloud config sync — detect folder name conflicts across devices
+  const syncCloudConfig = async (localConfig) => {
+    try {
+      const cloud = await readCloudConfig();
+      const syncFields = ['inboxFolder', 'validatedFolder', 'reviewFolder', 'sheetId', 'sheetName'];
+
+      if (!cloud) {
+        // No cloud config yet — upload current config as the source of truth
+        const toSave = {};
+        syncFields.forEach(k => { if (localConfig[k]) toSave[k] = localConfig[k]; });
+        toSave.updatedAt = new Date().toISOString();
+        await saveCloudConfig(toSave);
+        return;
+      }
+
+      // Check for conflicts
+      const conflicts = syncFields.filter(k =>
+        cloud[k] && localConfig[k] && cloud[k] !== localConfig[k]
+      );
+
+      if (conflicts.length > 0) {
+        // There's a conflict — show resolution UI
+        setConfigConflict({ cloud, local: localConfig, fields: conflicts });
+      } else {
+        // No conflict — merge (cloud wins for missing values)
+        let updated = { ...localConfig };
+        let changed = false;
+        syncFields.forEach(k => {
+          if (cloud[k] && !localConfig[k]) {
+            updated[k] = cloud[k];
+            changed = true;
+          }
+        });
+        if (changed) {
+          setConfig(updated);
+          await store('rr-config', updated);
+        }
+      }
+    } catch (e) {
+      console.warn('Cloud config sync failed:', e);
+    }
+  };
+
+  // Resolve config conflict — user picks cloud or local
+  const resolveConfigConflict = async (useCloud) => {
+    if (!configConflict) return;
+    const syncFields = ['inboxFolder', 'validatedFolder', 'reviewFolder', 'sheetId', 'sheetName'];
+    let merged = { ...config };
+
+    if (useCloud) {
+      // Use cloud values
+      syncFields.forEach(k => {
+        if (configConflict.cloud[k]) merged[k] = configConflict.cloud[k];
+      });
+    }
+    // Save merged config to both local and cloud
+    setConfig(merged);
+    await store('rr-config', merged);
+    const toSave = {};
+    syncFields.forEach(k => { if (merged[k]) toSave[k] = merged[k]; });
+    toSave.updatedAt = new Date().toISOString();
+    await saveCloudConfig(toSave);
+    setConfigConflict(null);
+  };
+
   const handleProcStatus = (status) => {
     setProcStatus(status);
     // T-014: update review count from processing results
@@ -237,6 +307,14 @@ export default function App() {
   const saveConfig = async (c) => {
     setConfig(c);
     await store('rr-config', c);
+    // Sync to cloud so other devices pick it up
+    if (c.connected) {
+      const syncFields = ['inboxFolder', 'validatedFolder', 'reviewFolder', 'sheetId', 'sheetName'];
+      const toSave = {};
+      syncFields.forEach(k => { if (c[k]) toSave[k] = c[k]; });
+      toSave.updatedAt = new Date().toISOString();
+      saveCloudConfig(toSave).catch(() => {});
+    }
   };
 
   const addReceipt = async (r) => {
@@ -422,6 +500,75 @@ export default function App() {
               navTo('review');
             }}
           />
+        )}
+
+        {/* Config conflict resolution modal */}
+        {configConflict && (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 800,
+            background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 20, animation: 'fadeIn 0.2s ease',
+          }}>
+            <div style={{
+              background: T.sf, borderRadius: 20, padding: '24px 20px',
+              maxWidth: 360, width: '100%',
+              border: `1px solid ${T.bdr}`,
+              boxShadow: '0 16px 48px rgba(0,0,0,0.4)',
+            }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: T.tx, marginBottom: 6 }}>
+                ⚠️ 设置不一致
+              </div>
+              <div style={{ fontSize: 12, color: T.tx2, marginBottom: 16, lineHeight: 1.6 }}>
+                检测到其他设备的文件夹设置与本设备不同，请选择使用哪一方：
+              </div>
+
+              {configConflict.fields.map(k => {
+                const labels = {
+                  inboxFolder: '📥 待处理', validatedFolder: '✅ 已存档',
+                  reviewFolder: '⚠️ 待确认', sheetId: '📊 记录表',
+                  sheetName: '📊 表格名',
+                };
+                return (
+                  <div key={k} style={{
+                    padding: '10px 12px', marginBottom: 8,
+                    background: T.sf2, borderRadius: 10, border: `1px solid ${T.bdr}`,
+                  }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: T.tx3, marginBottom: 6 }}>
+                      {labels[k] || k}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <div style={{ flex: 1, fontSize: 12, color: T.tx }}>
+                        <span style={{ fontSize: 10, color: T.tx3 }}>☁️ 云端：</span><br/>
+                        <strong>{configConflict.cloud[k]?.slice?.(0, 20) || '—'}</strong>
+                      </div>
+                      <div style={{ flex: 1, fontSize: 12, color: T.tx }}>
+                        <span style={{ fontSize: 10, color: T.tx3 }}>📱 本地：</span><br/>
+                        <strong>{configConflict.local[k]?.slice?.(0, 20) || '—'}</strong>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+                <button onClick={() => resolveConfigConflict(true)} style={{
+                  flex: 1, padding: '12px', borderRadius: 12,
+                  background: T.accDim, border: `1px solid rgba(250,204,21,0.3)`,
+                  color: T.acc, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: F,
+                }}>
+                  ☁️ 用云端的
+                </button>
+                <button onClick={() => resolveConfigConflict(false)} style={{
+                  flex: 1, padding: '12px', borderRadius: 12,
+                  background: T.sf2, border: `1px solid ${T.bdr}`,
+                  color: T.tx, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: F,
+                }}>
+                  📱 用本地的
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Auth loading overlay — robot animation */}

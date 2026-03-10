@@ -341,8 +341,8 @@ export default function LogView({ receipts, onDelete, onDetail, config }) {
       {/* Header row with export menu */}
       <div style={{ position: 'relative' }}>
         <Header title="消费记录" sub={`${timeFiltered.length} 张 · $${totalAll.toFixed(2)} · ${periodSub(timePeriod)}`} />
-        {receipts.length > 0 && (
-          <div style={{ position: 'absolute', top: 16, right: 0 }}>
+        {activeReceipts.length > 0 && (
+          <div style={{ position: 'absolute', top: 52, right: 0 }}>
             <button
               onClick={() => setShowExport(v => !v)}
               onBlur={() => setTimeout(() => setShowExport(false), 150)}

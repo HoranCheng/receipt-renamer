@@ -502,6 +502,91 @@ export async function createReceiptSheet(sheetName = 'receipt_index') {
   return spreadsheetId;
 }
 
+// ─── Cloud config sync (multi-device folder names etc.) ──────────────────────
+
+const CONFIG_FILE_NAME = 'rr-config.json';
+
+/** Read cloud config from Drive (stored as JSON file in root folder) */
+export async function readCloudConfig() {
+  try {
+    const rootId = await getOrCreateRootFolder();
+    const data = await driveReq('GET', '/files', {
+      params: {
+        q: `name='${CONFIG_FILE_NAME}' and '${rootId}' in parents and trashed=false`,
+        fields: 'files(id)',
+        pageSize: 1,
+      },
+    });
+    if (!data.files?.length) return null;
+    const token = await ensureToken();
+    const res = await fetch(`${DRIVE_API}/files/${data.files[0].id}?alt=media`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+/** Save cloud config to Drive */
+export async function saveCloudConfig(configData) {
+  try {
+    const rootId = await getOrCreateRootFolder();
+    // Check if config file already exists
+    const data = await driveReq('GET', '/files', {
+      params: {
+        q: `name='${CONFIG_FILE_NAME}' and '${rootId}' in parents and trashed=false`,
+        fields: 'files(id)',
+        pageSize: 1,
+      },
+    });
+
+    const token = await ensureToken();
+    const content = JSON.stringify(configData, null, 2);
+    const blob = new Blob([content], { type: 'application/json' });
+
+    if (data.files?.length) {
+      // Update existing
+      const fileId = data.files[0].id;
+      const res = await fetch(
+        `${DRIVE_UPLOAD_API}/files/${fileId}?uploadType=media`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: blob,
+        }
+      );
+      if (!res.ok) throw new Error(`Update config failed (${res.status})`);
+    } else {
+      // Create new
+      const metadata = { name: CONFIG_FILE_NAME, parents: [rootId] };
+      const boundary = 'rr_cfg_boundary';
+      const metaPart = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(metadata)}\r\n`;
+      const mediaPart = `--${boundary}\r\nContent-Type: application/json\r\n\r\n`;
+      const closePart = `\r\n--${boundary}--`;
+      const body = new Blob([metaPart, mediaPart, blob, closePart]);
+
+      await fetch(
+        `${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': `multipart/related; boundary=${boundary}`,
+          },
+          body,
+        }
+      );
+    }
+  } catch (e) {
+    console.warn('Failed to save cloud config:', e);
+  }
+}
+
 // ─── Sheets ───────────────────────────────────────────────────────────────────
 
 /** Read all rows from the receipt sheet (for multi-device sync) */
