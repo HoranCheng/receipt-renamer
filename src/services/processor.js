@@ -111,9 +111,8 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
     const confidence = data.confidence || 0;
     const ext = file.name.split('.').pop() || 'jpg';
     const safeDate = fmtDate(data.date);
-    const safeMerchant = safeName(toTitleCase(data.merchant || 'Unknown'));
-    const safeAmount = parseFloat(data.amount || 0).toFixed(2);
-    const newName = `${safeDate} ${safeMerchant} ${safeAmount}.${ext}`;
+    const safeCategory = safeName(data.category || 'Other');
+    const newName = `${safeDate} ${safeCategory}.${ext}`;
 
     const receiptRecord = {
       id: file.id,
