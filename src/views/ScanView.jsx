@@ -15,6 +15,7 @@ import {
   STALE_DAYS,
 } from '../services/pendingQueue';
 import { cacheImage, rekeyCache } from '../services/imageCache';
+import { enqueueFile } from '../services/processor';
 
 // Network check (Android; iOS Safari doesn't expose connection.type)
 function isWifi() {
@@ -56,7 +57,7 @@ function ProgressRing({ status }) {
 
 const MAX_RETRIES = 3;
 
-export default function ScanView({ onUploaded, onSync, procStatus, config }) {
+export default function ScanView({ onUploaded, onSync, procStatus, config, onStatusChange, onReceiptProcessed }) {
   // items: { id, name, status, retries, error, previewUrl, fromIndexedDB, fileBlob }
   const [items, setItems] = useState([]);
   const [storageAlert, setStorageAlert] = useState(null); // null | { level:'warn'|'crit', totalBytes, count, hasStale }
@@ -159,6 +160,12 @@ export default function ScanView({ onUploaded, onSync, procStatus, config }) {
           // Rekey image cache: temp id → Drive file id (so ReviewView can find it)
           if (uploaded?.id) {
             rekeyCache(pending.id, uploaded.id).catch(() => {});
+            // Store uploaded file info for immediate AI processing
+            pending._uploadedFile = {
+              id: uploaded.id,
+              name: fileName,
+              mimeType: file.type || 'image/jpeg',
+            };
           }
           success = true;
           break;
@@ -177,6 +184,10 @@ export default function ScanView({ onUploaded, onSync, procStatus, config }) {
         // Remove from IndexedDB if it was persisted
         if (pending.fromIndexedDB) {
           try { await removePending(pending.id); } catch {}
+        }
+        // T-015: Immediately enqueue for AI processing after each upload
+        if (pending._uploadedFile && onStatusChange) {
+          enqueueFile(pending._uploadedFile, config, onStatusChange, onReceiptProcessed);
         }
       } else {
         updateItem(pending.id, { status: 'failed', error: lastError });

@@ -50,7 +50,7 @@ const tabs = [
   { id: 'cfg',    lb: '设置' },
 ];
 
-export default function Nav({ view, set }) {
+export default function Nav({ view, set, reviewCount = 0 }) {
   return (
     <nav
       style={{
@@ -94,7 +94,20 @@ export default function Nav({ view, set }) {
               stroke: 'currentColor',
             }}
           >
-            {icons[t.id]}
+            <div style={{ position: 'relative', display: 'inline-flex' }}>
+              {icons[t.id]}
+              {t.id === 'review' && reviewCount > 0 && (
+                <span style={{
+                  position: 'absolute', top: -4, right: -8,
+                  background: '#f87171', color: '#fff',
+                  fontSize: 9, fontWeight: 800, fontFamily: F,
+                  borderRadius: 10, padding: '1px 5px',
+                  minWidth: 14, textAlign: 'center',
+                  lineHeight: '14px',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                }}>{reviewCount > 99 ? '99+' : reviewCount}</span>
+              )}
+            </div>
             <span style={{
               fontSize: 10,
               fontWeight: 700,

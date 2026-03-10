@@ -11,7 +11,7 @@ import {
   signOut,
   getAccessToken,
 } from './services/google';
-import { processInboxBackground } from './services/processor';
+import { processInboxBackground, getSavedProgress } from './services/processor';
 import { store, load } from './services/storage';
 import { css } from './styles';
 import Nav from './components/Nav';
@@ -47,6 +47,7 @@ export default function App() {
   const [detailReceipt, setDetailReceipt] = useState(null);
   const [procStatus, setProcStatus] = useState(null); // { processing, current, total, done, failed }
   const [authLoading, setAuthLoading] = useState(false);
+  const [reviewCount, setReviewCount] = useState(0); // T-014: badge for review tab
 
   useEffect(() => {
     (async () => {
@@ -90,11 +91,41 @@ export default function App() {
       } catch {
         setNonReceiptAlerts([]);
       }
+
+      // T-018: Check for saved processing progress from previous session
+      const savedProgress = getSavedProgress();
+      if (savedProgress) {
+        setProcStatus({ ...savedProgress, processing: false, resumed: true });
+      }
     })();
   }, []);
 
+  // T-017: Resume processing when app becomes visible again
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && config.setupDone && config.connected) {
+        // Check if there's unfinished work in inbox
+        const saved = getSavedProgress();
+        if (saved && saved.processing) {
+          // There was unfinished work — resume
+          triggerProcessing();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [config]);
+
+  const handleProcStatus = (status) => {
+    setProcStatus(status);
+    // T-014: update review count from processing results
+    if (status.review > 0) {
+      setReviewCount(prev => prev + status.review);
+    }
+  };
+
   const triggerProcessing = (cfg) => {
-    processInboxBackground(cfg || config, setProcStatus, addReceipt);
+    processInboxBackground(cfg || config, handleProcStatus, addReceipt);
   };
 
   // Navigate with graceful auth refresh for views that need Drive access
@@ -273,9 +304,14 @@ export default function App() {
               animation: 'spin 0.8s linear infinite',
               flexShrink: 0,
             }} />
-            {procStatus.total > 1
-              ? `AI 识别中 · 共 ${procStatus.total} 张`
-              : 'AI 识别中…'}
+            {(() => {
+              const remaining = (procStatus.total || 0) - (procStatus.done || 0) - (procStatus.failed || 0);
+              const parts = [`AI 识别中`];
+              if (procStatus.total > 1) parts.push(`${procStatus.done || 0}/${procStatus.total}`);
+              if (remaining > 0) parts.push(`剩余 ${remaining} 张`);
+              if (procStatus.failed > 0) parts.push(`${procStatus.failed} 失败`);
+              return parts.join(' · ');
+            })()}
           </div>
         )}
 
@@ -314,9 +350,11 @@ export default function App() {
         {view === 'scan' && (
           <ScanView
             config={config}
-            onUploaded={() => triggerProcessing()}
+            onUploaded={() => {}}
             onSync={() => triggerProcessing()}
             procStatus={procStatus}
+            onStatusChange={handleProcStatus}
+            onReceiptProcessed={addReceipt}
           />
         )}
         {view === 'review' && <ReviewView config={config} />}
@@ -346,7 +384,10 @@ export default function App() {
           />
         )}
 
-        <Nav view={view} set={handleNav} />
+        <Nav view={view} set={(v) => {
+          if (v === 'review') setReviewCount(0); // Clear badge when entering review
+          handleNav(v);
+        }} reviewCount={reviewCount} />
       </div>
     </ErrorBoundary>
   );

@@ -1,14 +1,48 @@
 import { useState } from 'react';
 import { T, FM } from '../constants/theme';
 import { CAT_ICON, CAT_CLR } from '../constants';
+import { getFileThumbnailUrl, getFileAsBlobUrl } from '../services/google';
 import Header from '../components/Header';
 import Field from '../components/Field';
 import Btn from '../components/Btn';
 import CatChips from '../components/CatChips';
 import StatusDot from '../components/StatusDot';
 
+// Lightweight lightbox for receipt photo preview
+function PhotoLightbox({ src, onClose }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 600,
+        background: 'rgba(0,0,0,0.92)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        animation: 'fadeIn 0.15s ease',
+      }}
+    >
+      <img src={src} alt="" style={{
+        maxWidth: '92vw', maxHeight: '85vh',
+        borderRadius: 8, objectFit: 'contain',
+      }} />
+      <button onClick={onClose} style={{
+        position: 'absolute', top: 16, right: 16,
+        width: 36, height: 36, borderRadius: '50%',
+        background: 'rgba(255,255,255,0.15)', border: 'none',
+        color: '#fff', fontSize: 18, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>✕</button>
+    </div>
+  );
+}
+
 export default function DetailView({ receipt, onSave, onBack }) {
   const [edit, setEdit] = useState({ ...receipt });
+  // T-020: Photo preview state
+  const [thumbUrl, setThumbUrl] = useState(null);
+  const [thumbLoading, setThumbLoading] = useState(false);
+  const [fullUrl, setFullUrl] = useState(null);
+  const [fullLoading, setFullLoading] = useState(false);
+  const [showLightbox, setShowLightbox] = useState(false);
 
   const handleSave = () => {
     onSave({ ...receipt, ...edit });
@@ -88,6 +122,93 @@ export default function DetailView({ receipt, onSave, onBack }) {
           </div>
         </div>
       </div>
+
+      {/* T-020: Receipt photo preview — loads from Drive on demand, no permanent local storage */}
+      {(receipt.driveId || receipt.fileId) && (
+        <div style={{
+          background: T.card, border: `1px solid ${T.bdr}`,
+          borderRadius: 16, overflow: 'hidden', marginBottom: 14,
+        }}>
+          <div
+            onClick={async () => {
+              const fid = receipt.driveId || receipt.fileId;
+              if (!fid) return;
+              if (fullUrl) { setShowLightbox(true); return; }
+              if (thumbUrl && !fullUrl) {
+                // Load full size
+                setFullLoading(true);
+                try {
+                  const url = await getFileAsBlobUrl(fid);
+                  setFullUrl(url);
+                  setShowLightbox(true);
+                } catch { /* stay on thumb */ }
+                setFullLoading(false);
+                return;
+              }
+              // First click: load thumbnail
+              setThumbLoading(true);
+              try {
+                const url = await getFileThumbnailUrl(fid);
+                if (url) {
+                  setThumbUrl(url);
+                } else {
+                  // No thumbnail, try full image directly
+                  const blobUrl = await getFileAsBlobUrl(fid);
+                  setFullUrl(blobUrl);
+                  setShowLightbox(true);
+                }
+              } catch {
+                // Can't load
+              }
+              setThumbLoading(false);
+            }}
+            style={{
+              width: '100%', aspectRatio: thumbUrl ? '4/3' : 'auto',
+              background: T.sf2,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', position: 'relative',
+              padding: thumbUrl ? 0 : '16px',
+            }}
+          >
+            {thumbLoading && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: T.tx3, padding: '20px' }}>
+                <div style={{
+                  width: 16, height: 16, border: `2px solid ${T.bdr}`,
+                  borderTopColor: T.acc, borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite',
+                }} />
+                <span style={{ fontSize: 12 }}>加载图片…</span>
+              </div>
+            )}
+            {!thumbLoading && thumbUrl && (
+              <>
+                <img src={thumbUrl} alt="" referrerPolicy="no-referrer"
+                  style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                <div style={{
+                  position: 'absolute', bottom: 8, right: 8,
+                  background: 'rgba(0,0,0,0.5)', borderRadius: 8,
+                  padding: '4px 10px', fontSize: 10, color: '#fff',
+                }}>
+                  {fullLoading ? '加载原图…' : '点击查看原图'}
+                </div>
+              </>
+            )}
+            {!thumbLoading && !thumbUrl && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                color: T.acc, fontSize: 13, fontWeight: 600,
+              }}>
+                <span>📷</span>
+                <span>点击加载小票照片</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showLightbox && (fullUrl || thumbUrl) && (
+        <PhotoLightbox src={fullUrl || thumbUrl} onClose={() => setShowLightbox(false)} />
+      )}
 
       {/* Editable fields */}
       <Field
