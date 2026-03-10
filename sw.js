@@ -203,20 +203,32 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// ─── Fetch (cache-first for shell, network-first for API) ───────────────────
+// ─── Fetch (SECURITY: only cache same-origin static assets) ─────────────────
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-  
-  // Don't cache Google API calls
-  const url = event.request.url;
-  if (url.includes('googleapis.com') || url.includes('accounts.google.com')) return;
+
+  const url = new URL(event.request.url);
+
+  // SECURITY: Only cache same-origin requests (our own static assets)
+  if (url.origin !== self.location.origin) return;
+
+  // Don't cache API-like paths or dynamic content
+  if (url.pathname.startsWith('/api/')) return;
+
+  // Only cache static assets: HTML, JS, CSS, images, fonts, manifest
+  const ext = url.pathname.split('.').pop()?.toLowerCase();
+  const staticExts = ['html', 'js', 'css', 'png', 'jpg', 'jpeg', 'svg', 'ico', 'woff', 'woff2', 'json'];
+  if (ext && !staticExts.includes(ext) && url.pathname !== '/') return;
 
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        // Only cache successful responses
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
         return response;
       })
       .catch(() => caches.match(event.request))
