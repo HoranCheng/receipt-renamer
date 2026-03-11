@@ -105,7 +105,16 @@ export default function App() {
               });
               hasToken = true;
             } catch {
-              console.info('Silent token refresh failed — will prompt on next action');
+              // Silent failed — try interactive auth immediately
+              try {
+                setAuthLoading(true);
+                await requestAccessToken({ persistent: false });
+                hasToken = true;
+                setAuthLoading(false);
+              } catch {
+                setAuthLoading(false);
+                console.info('Interactive auth failed/cancelled on startup');
+              }
             }
           }
 
@@ -534,9 +543,20 @@ export default function App() {
   };
 
   const handleReset = async () => {
-    if (!confirm('确定要清除所有设置和记录吗？')) return;
+    if (!confirm('确定要清除所有本地缓存吗？（不影响 Google 账号连接和 Drive 数据）')) return;
+    // Preserve auth state across reset
+    const preservedAuth = {
+      connected: config.connected,
+      googleProfile: config.googleProfile,
+      clientId: config.clientId,
+      setupDone: config.setupDone,
+      sheetId: config.sheetId,
+      sheetName: config.sheetName,
+    };
     clearAllData();
-    setConfig(DEFAULT_CONFIG);
+    const resetConfig = { ...DEFAULT_CONFIG, ...preservedAuth };
+    setConfig(resetConfig);
+    await store('rr-config', resetConfig);
     setReceipts([]);
     // Also clear IndexedDB caches (both scoped and unscoped)
     try {

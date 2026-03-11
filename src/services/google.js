@@ -711,6 +711,10 @@ export async function readSheetRecords(spreadsheetId, sheetName = 'receipt_index
     { headers: { Authorization: `Bearer ${token}` } }
   );
   if (!res.ok) {
+    if (res.status === 404) {
+      // Sheet or spreadsheet was deleted — return empty
+      return [];
+    }
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error?.message || `Sheets read error (${res.status})`);
   }
