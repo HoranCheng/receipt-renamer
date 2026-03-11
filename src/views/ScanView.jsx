@@ -309,7 +309,7 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
             mimeType: pending._uploadedFile.mimeType,
             step: 'ai', // Already uploaded, just needs AI
             proxyUrl: import.meta.env.VITE_AI_PROXY_URL || '',
-            uid: localStorage.getItem('receipt_google_uid') || 'anonymous',
+            uid: localStorage.getItem('rr-current-user') || 'anonymous',
           });
           if (!swQueued) {
             // Fallback: main thread processing
@@ -347,11 +347,11 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
     const files = [];
     for (const file of rawFiles) {
       if (file.size > MAX_FILE_SIZE) {
-        alert(`文件 "${file.name}" 太大（${(file.size / 1024 / 1024).toFixed(1)}MB），最大支持 10MB。可在设置中开启"上传前压缩"来缩小文件。`);
+        showToast?.(`文件 "${file.name}" 太大（${(file.size / 1024 / 1024).toFixed(1)}MB），最大 10MB`, 'error', 4000);
         continue;
       }
       if (file.type && !ALLOWED_TYPES.includes(file.type)) {
-        alert(`文件 "${file.name}" 类型不支持（${file.type}）。目前支持：JPEG、PNG、PDF`);
+        showToast?.(`不支持的文件类型：${file.type}。仅支持 JPEG/PNG/PDF`, 'error', 4000);
         continue;
       }
       files.push(file);

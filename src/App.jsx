@@ -119,9 +119,9 @@ export default function App() {
         });
       }
 
-      // Check for pending non-receipt alerts from previous sessions
+      // Check for pending non-receipt alerts from previous sessions (user-scoped)
       try {
-        const alerts = JSON.parse(localStorage.getItem('rr-non-receipt-alerts') || '[]');
+        const alerts = await load('rr-non-receipt-alerts', []);
         setNonReceiptAlerts(alerts);
         if (alerts.length > 0) setShowNonReceiptModal(true);
       } catch {
@@ -129,7 +129,7 @@ export default function App() {
       }
 
       // T-018: Check for saved processing progress from previous session
-      const savedProgress = getSavedProgress();
+      const savedProgress = await getSavedProgress();
       if (savedProgress) {
         setProcStatus({ ...savedProgress, processing: false, resumed: true });
       }
@@ -181,7 +181,7 @@ export default function App() {
 
   // T-017: Resume processing when app becomes visible again
   useEffect(() => {
-    const handleVisibility = () => {
+    const handleVisibility = async () => {
       if (document.visibilityState === 'visible' && config.setupDone && config.connected) {
         // Send fresh token to SW
         const token = getAccessToken();
@@ -191,7 +191,7 @@ export default function App() {
         resumeSWProcessing();
 
         // Also check main-thread queue
-        const saved = getSavedProgress();
+        const saved = await getSavedProgress();
         if (saved && saved.processing) {
           triggerProcessing();
         }
@@ -705,7 +705,7 @@ export default function App() {
             liveResults={liveResults}
           />
         )}
-        {view === 'review' && <ReviewView config={config} />}
+        {view === 'review' && <ReviewView config={config} showToast={showToast} />}
         {view === 'inbox' && <InboxView config={config} onProcessed={addReceipt} />}
         {view === 'log' && !detailReceipt && (
           <LogView

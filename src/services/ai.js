@@ -8,7 +8,7 @@ const ALLOWED_MIME = ['image/jpeg', 'image/png', 'application/pdf'];
 // ─── Proxy mode (Gemini 2.0 Flash via receipt-proxy Worker) ──────────────────
 
 async function analyzeViaProxy(base64, mediaType, fileType) {
-  const uid = localStorage.getItem('receipt_google_uid') || 'anonymous';
+  const uid = localStorage.getItem('rr-current-user') || 'anonymous';
 
   const res = await fetch(`${PROXY_URL}/api/analyze`, {
     method: 'POST',

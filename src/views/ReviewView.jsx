@@ -17,6 +17,7 @@ import Field from '../components/Field';
 import CatChips from '../components/CatChips';
 import StatusDot from '../components/StatusDot';
 import { RobotWorking, RobotDone, NotReceiptBadge } from '../components/RobotScene';
+import { store, load } from '../services/storage';
 
 // ─── Image Lightbox with pinch-to-zoom ────────────────────────────────────────
 
@@ -134,7 +135,7 @@ function Lightbox({ src, onClose }) {
 
 // ─── Main ReviewView ──────────────────────────────────────────────────────────
 
-export default function ReviewView({ config, onReceiptProcessed }) {
+export default function ReviewView({ config, onReceiptProcessed, showToast }) {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -142,6 +143,7 @@ export default function ReviewView({ config, onReceiptProcessed }) {
   const [deleting, setDeleting] = useState(null);
   const [reviewFolderId, setReviewFolderId] = useState(null);
   const [validFolderId, setValidFolderId] = useState(null);
+  const [inboxFolderId, setInboxFolderId] = useState(null);
   // Image preview states
   const [previewUrl, setPreviewUrl] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -159,6 +161,7 @@ export default function ReviewView({ config, onReceiptProcessed }) {
       ]);
       setReviewFolderId(reviewId);
       setValidFolderId(validId);
+      setInboxFolderId(inboxId);
       // Load from both review folder and inbox (unprocessed files)
       const [reviewResult, inboxResult] = await Promise.all([
         listFilesInFolder(reviewId),
@@ -178,9 +181,9 @@ export default function ReviewView({ config, onReceiptProcessed }) {
     } catch (e) {
       const msg = e.message || '';
       if (msg.includes('重新登录') || msg.includes('authentication') || msg.includes('401')) {
-        alert('登录已过期，请回到设置页重新连接 Google 账号。');
+        showToast?.('登录已过期，请回到设置页重新连接', 'error', 5000);
       } else {
-        alert('加载失败：' + msg);
+        showToast?.('加载失败：' + msg, 'error', 4000);
       }
     }
     setLoading(false);
@@ -212,6 +215,7 @@ export default function ReviewView({ config, onReceiptProcessed }) {
     setEditing({
       fileId: file.id,
       name: file.name,
+      source: file.source || 'review', // track which folder file came from
       isNotReceipt: file.aiData.reviewStatus === 'not_receipt',
       data: {
         date: file.aiData.date || '',
@@ -236,7 +240,9 @@ export default function ReviewView({ config, onReceiptProcessed }) {
       const safeCategory = (d.category || 'Other').replace(/[/\\?%*:|"<>]/g, '-').trim();
       const newName = `${safeDate} ${safeCategory}.${ext}`;
 
-      await renameAndMoveFile(editing.fileId, newName, validFolderId, reviewFolderId);
+      // Use correct source folder based on where the file came from
+      const sourceFolderId = editing.source === 'inbox' ? inboxFolderId : reviewFolderId;
+      await renameAndMoveFile(editing.fileId, newName, validFolderId, sourceFolderId);
       await updateFileMetadata(editing.fileId, {
         description: JSON.stringify({ ...d, reviewStatus: 'approved', approvedAt: new Date().toISOString() }),
       });
@@ -266,7 +272,7 @@ export default function ReviewView({ config, onReceiptProcessed }) {
       setFiles(prev => prev.filter(f => f.id !== editing.fileId));
       setEditing(null);
     } catch (e) {
-      alert('操作失败：' + e.message);
+      showToast?.('操作失败：' + e.message, 'error');
     }
     setApproving(null);
   };
@@ -279,15 +285,14 @@ export default function ReviewView({ config, onReceiptProcessed }) {
       removeCachedImage(fileId).catch(() => {});
       setFiles(prev => prev.filter(f => f.id !== fileId));
       if (editing?.fileId === fileId) setEditing(null);
-      // Also clean from non-receipt alerts
+      // Also clean from non-receipt alerts (user-scoped)
       try {
-        const key = 'rr-non-receipt-alerts';
-        const alerts = JSON.parse(localStorage.getItem(key) || '[]');
+        const alerts = await load('rr-non-receipt-alerts', []);
         const updated = alerts.filter(a => a.fileId !== fileId);
-        localStorage.setItem(key, JSON.stringify(updated));
+        await store('rr-non-receipt-alerts', updated);
       } catch {}
     } catch (e) {
-      alert('删除失败：' + e.message);
+      showToast?.('删除失败：' + e.message, 'error');
     }
     setDeleting(null);
   };

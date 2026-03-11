@@ -14,6 +14,7 @@ import {
 } from './google';
 import { analyzeReceipt } from './ai';
 import { removeCachedImage } from './imageCache';
+import { store, load } from './storage';
 
 // Callback to update config from processor (e.g. when auto-creating sheet)
 let _configCallback = null;
@@ -91,17 +92,12 @@ let _stats = { processing: false, total: 0, done: 0, failed: 0, review: 0 };
 
 function _notifyStatus() {
   _statusCallback?.({ ..._stats });
-  // Persist progress for state recovery (T-018)
-  try {
-    localStorage.setItem('rr-proc-progress', JSON.stringify({
-      ..._stats,
-      updatedAt: Date.now(),
-    }));
-  } catch {}
+  // Persist progress for state recovery (T-018) — user-scoped
+  store('rr-proc-progress', { ..._stats, updatedAt: Date.now() }).catch(() => {});
 }
 
 function _clearPersistedProgress() {
-  try { localStorage.removeItem('rr-proc-progress'); } catch {}
+  store('rr-proc-progress', null).catch(() => {});
 }
 
 export function isProcessing() {
@@ -109,13 +105,10 @@ export function isProcessing() {
 }
 
 /** Get saved progress from last session (for T-018 state recovery) */
-export function getSavedProgress() {
+export async function getSavedProgress() {
   try {
-    const raw = localStorage.getItem('rr-proc-progress');
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    // Only return if it was still processing
-    if (data.processing) return data;
+    const data = await load('rr-proc-progress', null);
+    if (data?.processing) return data;
     return null;
   } catch { return null; }
 }
@@ -141,8 +134,7 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
         }),
       });
       try {
-        const key = 'rr-non-receipt-alerts';
-        const existing = JSON.parse(localStorage.getItem(key) || '[]');
+        const existing = await load('rr-non-receipt-alerts', []);
         if (!existing.find(a => a.fileId === file.id)) {
           existing.push({
             fileId: file.id,
@@ -150,7 +142,7 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
             driveLink: `https://drive.google.com/file/d/${file.id}/view`,
             detectedAt: Date.now(),
           });
-          localStorage.setItem(key, JSON.stringify(existing));
+          await store('rr-non-receipt-alerts', existing);
         }
       } catch {}
       return { success: false, reason: 'not_receipt' };
