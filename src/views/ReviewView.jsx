@@ -160,7 +160,12 @@ export default function ReviewView({ config, onReceiptProcessed }) {
       });
       setFiles(enriched);
     } catch (e) {
-      alert('加载失败：' + e.message);
+      const msg = e.message || '';
+      if (msg.includes('重新登录') || msg.includes('authentication') || msg.includes('401')) {
+        alert('登录已过期，请回到设置页重新连接 Google 账号。');
+      } else {
+        alert('加载失败：' + msg);
+      }
     }
     setLoading(false);
   };

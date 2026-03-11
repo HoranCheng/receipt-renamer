@@ -150,6 +150,11 @@ function getToken() {
   return window.gapi?.client?.getToken()?.access_token;
 }
 
+function _clearToken() {
+  try { window.gapi?.client?.setToken(null); } catch {}
+  try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+}
+
 /** Fetch the signed-in user's Google profile (name, email, picture) */
 export async function fetchUserProfile() {
   const token = await ensureToken();
@@ -200,6 +205,30 @@ async function driveReq(method, path, { params, body, responseType } = {}) {
     body: body ? (body instanceof Blob || body instanceof FormData ? body : JSON.stringify(body)) : undefined,
   });
 
+  if (res.status === 401) {
+    // Token expired — try to refresh and retry once
+    console.info('Token expired, attempting silent refresh...');
+    _clearToken();
+    try {
+      const freshToken = await ensureToken();
+      headers.Authorization = `Bearer ${freshToken}`;
+      const retryRes = await fetch(url, {
+        method,
+        headers,
+        body: body ? (body instanceof Blob || body instanceof FormData ? body : JSON.stringify(body)) : undefined,
+      });
+      if (retryRes.ok) {
+        if (responseType === 'arrayBuffer') return retryRes.arrayBuffer();
+        if (responseType === 'blob') return retryRes.blob();
+        if (retryRes.status === 204) return null;
+        return retryRes.json();
+      }
+      const retryErr = await retryRes.json().catch(() => ({}));
+      throw new Error(retryErr.error?.message || `Drive API error after re-auth (${retryRes.status})`);
+    } catch (refreshErr) {
+      throw new Error('登录已过期，请重新登录。' + (refreshErr.message || ''));
+    }
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error?.message || `Drive API error (${res.status})`);
@@ -215,15 +244,24 @@ async function driveReq(method, path, { params, body, responseType } = {}) {
 
 async function getOrCreateRootFolder() {
   if (_cachedRootFolderId) return _cachedRootFolderId;
+  // Search for ALL matching root folders (not just first) to detect duplicates
   const data = await driveReq('GET', '/files', {
     params: {
       q: `name='${ROOT_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents`,
-      fields: 'files(id)',
-      pageSize: 1,
+      fields: 'files(id,createdTime)',
+      pageSize: 10,
     },
   });
   if (data.files?.length) {
-    _cachedRootFolderId = data.files[0].id;
+    // Use the oldest one as canonical; schedule dedup for extras
+    const sorted = data.files.sort((a, b) => (a.createdTime || '').localeCompare(b.createdTime || ''));
+    _cachedRootFolderId = sorted[0].id;
+    if (sorted.length > 1) {
+      // Merge duplicates in background
+      _mergeDuplicateRootFolders(sorted[0].id, sorted.slice(1).map(f => f.id)).catch(e =>
+        console.warn('Root folder dedup failed:', e)
+      );
+    }
     return _cachedRootFolderId;
   }
   const created = await driveReq('POST', '/files', {
@@ -232,6 +270,34 @@ async function getOrCreateRootFolder() {
   });
   _cachedRootFolderId = created.id;
   return _cachedRootFolderId;
+}
+
+/**
+ * Move all children from duplicate root folders into the canonical one, then trash duplicates.
+ */
+async function _mergeDuplicateRootFolders(canonicalId, duplicateIds) {
+  for (const dupId of duplicateIds) {
+    // List all files in the duplicate folder
+    const children = await driveReq('GET', '/files', {
+      params: {
+        q: `'${dupId}' in parents and trashed=false`,
+        fields: 'files(id,name)',
+        pageSize: 100,
+      },
+    });
+    // Move each child to canonical folder
+    for (const child of (children.files || [])) {
+      await driveReq('PATCH', `/files/${child.id}`, {
+        body: {},
+        params: { addParents: canonicalId, removeParents: dupId, fields: 'id' },
+      });
+    }
+    // Trash the now-empty duplicate
+    await driveReq('PATCH', `/files/${dupId}`, {
+      body: { trashed: true },
+    });
+    console.info(`Merged duplicate root folder ${dupId} into ${canonicalId}`);
+  }
 }
 
 // ─── Folder helpers ───────────────────────────────────────────────────────────
@@ -331,16 +397,25 @@ export async function findOrCreateFolder(name) {
   }
 
   const rootId = await getOrCreateRootFolder();
+  // Search for ALL matching folders to detect duplicates
   const data = await driveReq('GET', '/files', {
     params: {
       q: `name='${name}' and '${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-      fields: 'files(id)',
-      pageSize: 1,
+      fields: 'files(id,createdTime)',
+      pageSize: 10,
     },
   });
   if (data.files?.length) {
-    _folderIdCache[name] = data.files[0].id;
-    return data.files[0].id;
+    // Use oldest as canonical; merge duplicates in background
+    const sorted = data.files.sort((a, b) => (a.createdTime || '').localeCompare(b.createdTime || ''));
+    const canonicalId = sorted[0].id;
+    _folderIdCache[name] = canonicalId;
+    if (sorted.length > 1) {
+      _mergeDuplicateFolders(canonicalId, sorted.slice(1).map(f => f.id)).catch(e =>
+        console.warn(`Subfolder dedup for "${name}" failed:`, e)
+      );
+    }
+    return canonicalId;
   }
   const created = await driveReq('POST', '/files', {
     body: { name, mimeType: 'application/vnd.google-apps.folder', parents: [rootId] },
@@ -348,6 +423,41 @@ export async function findOrCreateFolder(name) {
   });
   _folderIdCache[name] = created.id;
   return created.id;
+}
+
+/**
+ * Merge duplicate subfolders: move children into canonical, trash duplicates.
+ */
+async function _mergeDuplicateFolders(canonicalId, duplicateIds) {
+  for (const dupId of duplicateIds) {
+    const children = await driveReq('GET', '/files', {
+      params: {
+        q: `'${dupId}' in parents and trashed=false`,
+        fields: 'files(id)',
+        pageSize: 200,
+      },
+    });
+    for (const child of (children.files || [])) {
+      await driveReq('PATCH', `/files/${child.id}`, {
+        body: {},
+        params: { addParents: canonicalId, removeParents: dupId, fields: 'id' },
+      });
+    }
+    await driveReq('PATCH', `/files/${dupId}`, { body: { trashed: true } });
+    console.info(`Merged duplicate subfolder ${dupId} into ${canonicalId}`);
+  }
+}
+
+/**
+ * Manually trigger dedup for all known folders.
+ * Called once after login to clean up any existing duplicates.
+ */
+export async function deduplicateFolders() {
+  try {
+    await getOrCreateRootFolder(); // This already handles root dedup
+  } catch (e) {
+    console.warn('Folder dedup failed:', e);
+  }
 }
 
 // ─── File operations ──────────────────────────────────────────────────────────

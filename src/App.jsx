@@ -12,6 +12,8 @@ import {
   getAccessToken,
   readCloudConfig,
   saveCloudConfig,
+  renameSubFolder,
+  deduplicateFolders,
 } from './services/google';
 import { processInboxBackground, getSavedProgress } from './services/processor';
 import { sendTokenToSW, onSWMessage, resumeSWProcessing, clearSWToken } from './services/swBridge';
@@ -94,8 +96,9 @@ export default function App() {
               }
             }
 
-            // Token available — sync cloud config
+            // Token available — sync cloud config + dedup folders
             syncCloudConfig(mergedConfig);
+            deduplicateFolders();
           }
         }).catch(() => {
           console.warn('Google API init skipped on startup');
@@ -185,10 +188,17 @@ export default function App() {
   }, [config]);
 
   // Cloud config sync — detect folder name conflicts across devices
+  // All user preferences that should sync across devices
+  const SYNC_FIELDS = [
+    'inboxFolder', 'validatedFolder', 'reviewFolder',
+    'sheetId', 'sheetName',
+    'compressImages', 'wifiOnlyUpload',
+  ];
+
   const syncCloudConfig = async (localConfig) => {
     try {
       const cloud = await readCloudConfig();
-      const syncFields = ['inboxFolder', 'validatedFolder', 'reviewFolder', 'sheetId', 'sheetName'];
+      const syncFields = SYNC_FIELDS;
 
       if (!cloud) {
         // No cloud config yet — upload current config as the source of truth
@@ -230,20 +240,41 @@ export default function App() {
   // Resolve config conflict — user picks cloud or local
   const resolveConfigConflict = async (useCloud) => {
     if (!configConflict) return;
-    const syncFields = ['inboxFolder', 'validatedFolder', 'reviewFolder', 'sheetId', 'sheetName'];
+    const syncFields = SYNC_FIELDS;
+    const folderFields = ['inboxFolder', 'validatedFolder', 'reviewFolder'];
     let merged = { ...config };
 
     if (useCloud) {
-      // Use cloud values
-      syncFields.forEach(k => {
-        if (configConflict.cloud[k]) merged[k] = configConflict.cloud[k];
-      });
+      // Use cloud values — and rename Drive folders to match
+      for (const k of syncFields) {
+        if (configConflict.cloud[k] != null) {
+          const oldVal = merged[k];
+          merged[k] = configConflict.cloud[k];
+          // Rename folder in Drive if it's a folder field and values differ
+          if (folderFields.includes(k) && oldVal && oldVal !== merged[k]) {
+            try { await renameSubFolder(oldVal, merged[k]); } catch (e) {
+              console.warn(`Failed to rename folder ${oldVal} → ${merged[k]}:`, e);
+            }
+          }
+        }
+      }
+    } else {
+      // Use local values — rename Drive folders to match local names
+      for (const k of folderFields) {
+        const cloudVal = configConflict.cloud[k];
+        const localVal = merged[k];
+        if (cloudVal && localVal && cloudVal !== localVal) {
+          try { await renameSubFolder(cloudVal, localVal); } catch (e) {
+            console.warn(`Failed to rename folder ${cloudVal} → ${localVal}:`, e);
+          }
+        }
+      }
     }
     // Save merged config to both local and cloud
     setConfig(merged);
     await store('rr-config', merged);
     const toSave = {};
-    syncFields.forEach(k => { if (merged[k]) toSave[k] = merged[k]; });
+    syncFields.forEach(k => { if (merged[k] != null) toSave[k] = merged[k]; });
     toSave.updatedAt = new Date().toISOString();
     await saveCloudConfig(toSave);
     setConfigConflict(null);
