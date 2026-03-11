@@ -217,22 +217,50 @@ export default function App() {
       if (!cloud) {
         // No cloud config yet — upload current config as the source of truth
         const toSave = {};
-        syncFields.forEach(k => { if (localConfig[k]) toSave[k] = localConfig[k]; });
+        syncFields.forEach(k => { if (localConfig[k] != null) toSave[k] = localConfig[k]; });
         toSave.updatedAt = new Date().toISOString();
         await saveCloudConfig(toSave);
         return;
       }
 
-      // Check for conflicts (use != null to handle booleans correctly)
+      // Determine if local is "fresh" (new device / never customized)
+      // A fresh device has no sheetId and uses default folder names
+      const isLocalFresh = !localConfig.sheetId && (
+        localConfig.inboxFolder === DEFAULT_CONFIG.inboxFolder &&
+        localConfig.validatedFolder === DEFAULT_CONFIG.validatedFolder &&
+        localConfig.reviewFolder === DEFAULT_CONFIG.reviewFolder
+      );
+
+      if (isLocalFresh) {
+        // New device — cloud wins for everything, no conflict prompt
+        let updated = { ...localConfig };
+        let changed = false;
+        syncFields.forEach(k => {
+          if (cloud[k] != null) {
+            updated[k] = cloud[k];
+            changed = true;
+          }
+        });
+        // Also pull sheetId/sheetName even though they're in syncFields
+        if (cloud.sheetId) { updated.sheetId = cloud.sheetId; changed = true; }
+        if (cloud.sheetName) { updated.sheetName = cloud.sheetName; changed = true; }
+        if (changed) {
+          setConfig(updated);
+          await store('rr-config', updated);
+          console.info('Synced cloud config to new device:', updated);
+        }
+        return;
+      }
+
+      // Both sides have customized values — check for conflicts
       const conflicts = syncFields.filter(k =>
         cloud[k] != null && localConfig[k] != null && cloud[k] !== localConfig[k]
       );
 
       if (conflicts.length > 0) {
-        // There's a conflict — show resolution UI
         setConfigConflict({ cloud, local: localConfig, fields: conflicts });
       } else {
-        // No conflict — merge (cloud wins for missing values)
+        // No conflict — merge (cloud wins for missing local values)
         let updated = { ...localConfig };
         let changed = false;
         syncFields.forEach(k => {
