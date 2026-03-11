@@ -7,3 +7,10 @@ dist/
 .claude/
 .vscode/
 dist/
+
+# Security & audit reports — local only, never push
+docs/*-review-*.md
+docs/*-report*.md
+docs/*-response*.md
+docs/*-audit*.md
+private/
