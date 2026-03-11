@@ -17,6 +17,7 @@ import Field from '../components/Field';
 import CatChips from '../components/CatChips';
 import StatusDot from '../components/StatusDot';
 import { RobotWorking, RobotDone, NotReceiptBadge } from '../components/RobotScene';
+import { buildReceiptName } from '../utils/naming';
 import { store, load as storageLoad } from '../services/storage';
 
 // ─── Image Lightbox with pinch-to-zoom ────────────────────────────────────────
@@ -236,9 +237,7 @@ export default function ReviewView({ config, onReceiptProcessed, showToast }) {
     try {
       const d = editing.data;
       const ext = editing.name.split('.').pop() || 'jpg';
-      const safeDate = (d.date || 'unknown-date').replace(/-/g, '.');
-      const safeCategory = (d.category || 'Other').replace(/[/\\?%*:|"<>]/g, '-').trim();
-      const newName = `${safeDate} ${safeCategory}.${ext}`;
+      const newName = buildReceiptName(d, ext);
 
       // Use correct source folder based on where the file came from
       const sourceFolderId = editing.source === 'inbox' ? inboxFolderId : reviewFolderId;
@@ -262,7 +261,7 @@ export default function ReviewView({ config, onReceiptProcessed, showToast }) {
           date: d.date, merchant: d.merchant, amount: d.amount,
           category: d.category, currency: d.currency || 'AUD',
           confidence: d.confidence, originalName: editing.name,
-          newName: `${safeDate} ${safeCategory}.${ext}`,
+          newName,
           createdAt: new Date().toISOString(),
         });
       } catch {}

@@ -711,7 +711,7 @@ export default function App() {
             liveResults={liveResults}
           />
         )}
-        {view === 'review' && <ReviewView config={config} showToast={showToast} />}
+        {view === 'review' && <ReviewView config={config} showToast={showToast} onReceiptProcessed={addReceipt} />}
         {view === 'inbox' && <InboxView config={config} onProcessed={addReceipt} />}
         {view === 'log' && !detailReceipt && (
           <LogView

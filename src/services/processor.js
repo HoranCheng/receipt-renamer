@@ -15,6 +15,7 @@ import {
 import { analyzeReceipt } from './ai';
 import { removeCachedImage } from './imageCache';
 import { store, load } from './storage';
+import { buildReceiptName } from '../utils/naming';
 
 // Callback to update config from processor (e.g. when auto-creating sheet)
 let _configCallback = null;
@@ -44,12 +45,12 @@ function _getOutboxKey() {
   } catch { return 'rr-sheets-outbox'; }
 }
 
-function _logSheetFailure(fileId, row, sheetId) {
+function _logSheetFailure(fileId, row, sheetId, sheetName) {
   try {
     const key = _getOutboxKey();
     const outbox = JSON.parse(localStorage.getItem(key) || '[]');
     outbox.push({
-      fileId, row, sheetId,
+      fileId, row, sheetId, sheetName: sheetName || 'receipt_index',
       failedAt: new Date().toISOString(),
       retries: 0,
     });
@@ -67,7 +68,7 @@ export async function retrySheetOutbox() {
     const remaining = [];
     for (const item of outbox) {
       try {
-        await appendToSheet(item.sheetId, 'receipt_index', item.row);
+        await appendToSheet(item.sheetId, item.sheetName || 'receipt_index', item.row);
         // Success — don't add to remaining
       } catch {
         item.retries = (item.retries || 0) + 1;
@@ -150,9 +151,7 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
 
     const confidence = data.confidence || 0;
     const ext = file.name.split('.').pop() || 'jpg';
-    const safeDate = fmtDate(data.date);
-    const safeCategory = safeName(data.category || 'Other');
-    const newName = `${safeDate} ${safeCategory}.${ext}`;
+    const newName = buildReceiptName(data, ext);
 
     const receiptRecord = {
       id: file.id,
@@ -206,7 +205,7 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
         if (!sheetOk) {
           receiptRecord.sheetSyncFailed = true;
           // Log failure for later investigation + outbox retry
-          _logSheetFailure(file.id, sheetRow, config.sheetId);
+          _logSheetFailure(file.id, sheetRow, config.sheetId, config.sheetName);
         }
       }
     } else {
