@@ -15,7 +15,7 @@ import {
   renameSubFolder,
   deduplicateFolders,
 } from './services/google';
-import { processInboxBackground, getSavedProgress } from './services/processor';
+import { processInboxBackground, getSavedProgress, setConfigCallback } from './services/processor';
 import { sendTokenToSW, onSWMessage, resumeSWProcessing, clearSWToken } from './services/swBridge';
 import { store, load, setCurrentUser, clearCurrentUserData, clearAllData } from './services/storage';
 import { css } from './styles';
@@ -57,6 +57,17 @@ export default function App() {
   const [configConflict, setConfigConflict] = useState(null); // { cloud, local, fields[] }
   const [liveResults, setLiveResults] = useState([]); // Live AI recognition results for current batch
   const { showToast, ToastContainer } = useToast();
+
+  // Let processor notify us when it auto-creates a sheet
+  useEffect(() => {
+    setConfigCallback((patch) => {
+      setConfig(prev => {
+        const updated = { ...prev, ...patch };
+        store('rr-config', updated);
+        return updated;
+      });
+    });
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -674,6 +685,7 @@ export default function App() {
             onDelete={deleteReceipt}
             onDetail={(r) => setDetailReceipt(r)}
             config={config}
+            refreshKey={receipts.length}
           />
         )}
         {view === 'log' && detailReceipt && (

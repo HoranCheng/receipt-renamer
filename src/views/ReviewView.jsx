@@ -217,13 +217,8 @@ export default function ReviewView({ config, onReceiptProcessed }) {
       const d = editing.data;
       const ext = editing.name.split('.').pop() || 'jpg';
       const safeDate = (d.date || 'unknown-date').replace(/-/g, '.');
-      const safeMerchant = (d.merchant || 'unknown')
-        .replace(/[/\\?%*:|"<>]/g, '-')
-        .split(' ')
-        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-        .join(' ');
-      const safeAmount = parseFloat(d.amount || 0).toFixed(2);
-      const newName = `${safeDate} ${safeMerchant} ${safeAmount}.${ext}`;
+      const safeCategory = (d.category || 'Other').replace(/[/\\?%*:|"<>]/g, '-').trim();
+      const newName = `${safeDate} ${safeCategory}.${ext}`;
 
       await renameAndMoveFile(editing.fileId, newName, validFolderId, reviewFolderId);
       await updateFileMetadata(editing.fileId, {
@@ -245,7 +240,7 @@ export default function ReviewView({ config, onReceiptProcessed }) {
           date: d.date, merchant: d.merchant, amount: d.amount,
           category: d.category, currency: d.currency || 'AUD',
           confidence: d.confidence, originalName: editing.name,
-          newName: `${safeDate} ${safeMerchant} ${safeAmount}.${ext}`,
+          newName: `${safeDate} ${safeCategory}.${ext}`,
           createdAt: new Date().toISOString(),
         });
       } catch {}

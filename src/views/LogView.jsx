@@ -283,7 +283,7 @@ function SwipeRow({ r, onDelete, onDetail }) {
   );
 }
 
-export default function LogView({ receipts, onDelete, onDetail, config }) {
+export default function LogView({ receipts, onDelete, onDetail, config, refreshKey }) {
   const [timePeriod, setTimePeriod] = useState('month'); // week | month | all
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -310,7 +310,7 @@ export default function LogView({ receipts, onDelete, onDetail, config }) {
           setSheetLoading(false);
         });
     }
-  }, [config?.sheetId]);
+  }, [config?.sheetId, refreshKey]);
 
   // Use the selected data source
   const activeReceipts = syncSource === 'cloud' && sheetRecords ? sheetRecords : receipts;

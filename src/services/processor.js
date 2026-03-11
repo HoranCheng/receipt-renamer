@@ -10,9 +10,14 @@ import {
   renameAndMoveFile,
   updateFileMetadata,
   appendToSheet,
+  createReceiptSheet,
 } from './google';
 import { analyzeReceipt } from './ai';
 import { removeCachedImage } from './imageCache';
+
+// Callback to update config from processor (e.g. when auto-creating sheet)
+let _configCallback = null;
+export function setConfigCallback(fn) { _configCallback = fn; }
 
 // Title-case a string: "WOOLWORTHS METRO" → "Woolworths Metro"
 function toTitleCase(str) {
@@ -154,9 +159,8 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
     const confidence = data.confidence || 0;
     const ext = file.name.split('.').pop() || 'jpg';
     const safeDate = fmtDate(data.date);
-    const safeMerchant = safeName(toTitleCase(data.merchant || 'Unknown'));
-    const safeAmount = parseFloat(data.amount || 0).toFixed(2);
-    const newName = `${safeDate} ${safeMerchant} ${safeAmount}.${ext}`;
+    const safeCategory = safeName(data.category || 'Other');
+    const newName = `${safeDate} ${safeCategory}.${ext}`;
 
     const receiptRecord = {
       id: file.id,
@@ -179,6 +183,19 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
       await renameAndMoveFile(file.id, newName, validId, inboxId);
       removeCachedImage(file.id).catch(() => {});
       // T-016: Auto-write to Sheets with retry + failure logging
+      // Auto-create sheet if not yet configured
+      if (!config.sheetId) {
+        try {
+          const newSheetId = await createReceiptSheet('receipt_index');
+          config.sheetId = newSheetId;
+          config.sheetName = 'receipt_index';
+          // Notify App to persist this config change
+          _configCallback?.({ sheetId: newSheetId, sheetName: 'receipt_index' });
+          console.info('Auto-created receipt_index sheet:', newSheetId);
+        } catch (e) {
+          console.warn('Auto-create sheet failed:', e);
+        }
+      }
       if (config.sheetId) {
         const sheetRow = [
           data.date, data.merchant, data.category, data.amount, data.currency || 'AUD', receiptRecord.driveLink,
