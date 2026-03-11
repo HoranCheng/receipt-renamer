@@ -15,7 +15,7 @@ import {
   renameSubFolder,
   deduplicateFolders,
 } from './services/google';
-import { processInboxBackground, getSavedProgress, setConfigCallback } from './services/processor';
+import { processInboxBackground, getSavedProgress, setConfigCallback, retrySheetOutbox } from './services/processor';
 import { sendTokenToSW, onSWMessage, resumeSWProcessing, clearSWToken } from './services/swBridge';
 import { store, load, setCurrentUser, clearCurrentUserData, clearAllData } from './services/storage';
 import { css } from './styles';
@@ -126,6 +126,16 @@ export default function App() {
               syncCloudConfig(mergedConfig);
             }
             deduplicateFolders();
+            // Retry any failed Sheets writes from previous sessions
+            retrySheetOutbox().then(() => {
+              // After successful retry, clean up local receipts that were pending
+              load('rr-receipts', []).then(localReceipts => {
+                const stillPending = localReceipts.filter(r => r.sheetSyncFailed);
+                if (stillPending.length < localReceipts.length) {
+                  store('rr-receipts', stillPending);
+                }
+              });
+            }).catch(() => {});
           }
         }).catch(() => {
           console.warn('Google API init skipped on startup');
@@ -445,11 +455,9 @@ export default function App() {
   };
 
   const addReceipt = async (r) => {
-    const updated = [r, ...receipts];
-    setReceipts(updated);
-    await store('rr-receipts', updated);
-    // Add to live results panel
+    // Add to live results panel (session-only display)
     setLiveResults(prev => [...prev, r]);
+
     // Toast: AI recognition complete
     const merchant = r.merchant || '未知商家';
     const amount = r.amount ? ` $${parseFloat(r.amount).toFixed(2)}` : '';
@@ -457,6 +465,14 @@ export default function App() {
       showToast(`${merchant}${amount} 已识别归档 📂`, 'success');
     } else if (r.status === 'review') {
       showToast(`${merchant}${amount} 需要人工审核 👀`, 'warn');
+    }
+
+    // Only persist locally if Sheets sync failed (so we can retry later)
+    // Successfully synced items live in Sheets only (single source of truth)
+    if (r.sheetSyncFailed) {
+      const updated = [r, ...receipts];
+      setReceipts(updated);
+      await store('rr-receipts', updated);
     }
   };
 

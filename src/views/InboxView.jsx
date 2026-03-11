@@ -92,6 +92,7 @@ export default function InboxView({ config, onProcessed }) {
         inboxIdRef.current
       );
 
+      let sheetSyncFailed = false;
       if (config.sheetId) {
         try {
           const link = `https://drive.google.com/file/d/${file.id}/view`;
@@ -109,6 +110,7 @@ export default function InboxView({ config, onProcessed }) {
           );
         } catch (e) {
           console.warn('Sheets sync failed:', e);
+          sheetSyncFailed = true;
         }
       }
 
@@ -119,6 +121,8 @@ export default function InboxView({ config, onProcessed }) {
         newName,
         fileId: file.id,
         validated: conf >= 70,
+        sheetSyncFailed,
+        status: conf >= 70 ? 'validated' : 'review',
         createdAt: new Date().toISOString(),
       };
 
