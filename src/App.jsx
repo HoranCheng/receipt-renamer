@@ -91,27 +91,40 @@ export default function App() {
       if (effectiveClientId && mergedConfig.setupDone) {
         // Load Google API scripts in background — don't block UI
         initGoogleAPI(effectiveClientId).then(async () => {
-          if (mergedConfig.connected) {
-            const email = mergedConfig.googleProfile?.email;
-            if (email) setLoginHint(email);
+          const email = mergedConfig.googleProfile?.email;
+          if (email) setLoginHint(email);
 
-            // Try restoring saved token (instant, no network, no UI)
-            const restored = tryRestoreSession();
-            if (!restored) {
-              try {
-                await requestAccessToken({
-                  prompt: '',
-                  loginHint: email,
-                  persistent: false,
-                });
-              } catch {
-                console.info('Silent token refresh failed — will prompt on next action');
-                return;
-              }
+          // Try restoring saved token (instant, no network, no UI)
+          let hasToken = tryRestoreSession();
+          if (!hasToken) {
+            try {
+              await requestAccessToken({
+                prompt: '',
+                loginHint: email,
+                persistent: false,
+              });
+              hasToken = true;
+            } catch {
+              console.info('Silent token refresh failed — will prompt on next action');
             }
+          }
 
-            // Token available — sync cloud config + dedup folders
-            syncCloudConfig(mergedConfig);
+          if (hasToken) {
+            // Update connected state if needed (e.g. new device, Safari re-auth)
+            if (!mergedConfig.connected) {
+              let googleProfile = mergedConfig.googleProfile;
+              try {
+                googleProfile = await fetchUserProfile();
+                if (googleProfile?.sub) setCurrentUser(googleProfile.sub);
+                else if (googleProfile?.email) setCurrentUser(googleProfile.email);
+              } catch {}
+              const updated = { ...mergedConfig, connected: true, googleProfile };
+              setConfig(updated);
+              store('rr-config', updated);
+              syncCloudConfig(updated);
+            } else {
+              syncCloudConfig(mergedConfig);
+            }
             deduplicateFolders();
           }
         }).catch(() => {
@@ -389,9 +402,32 @@ export default function App() {
         setAuthLoading(false);
       }
 
-      // All silent methods failed — redirect to settings for manual login
-      navTo('cfg');
-      return;
+      // All silent methods failed — try interactive login directly
+      try {
+        setAuthLoading(true);
+        await requestAccessToken({ persistent: false }); // interactive consent
+        let googleProfile = config.googleProfile;
+        try {
+          googleProfile = await fetchUserProfile();
+          if (googleProfile?.email) setLoginHint(googleProfile.email);
+          if (googleProfile?.sub) setCurrentUser(googleProfile.sub);
+          else if (googleProfile?.email) setCurrentUser(googleProfile.email);
+        } catch {}
+        const updated = { ...config, connected: true, googleProfile };
+        setConfig(updated);
+        await store('rr-config', updated);
+        setAuthLoading(false);
+        // Sync cloud config after login
+        syncCloudConfig(updated);
+        deduplicateFolders();
+        navTo(newView);
+        return;
+      } catch {
+        setAuthLoading(false);
+        // Interactive login also failed/cancelled — go to settings
+        navTo('cfg');
+        return;
+      }
     }
     navTo(newView);
   };
