@@ -17,7 +17,7 @@ import Field from '../components/Field';
 import CatChips from '../components/CatChips';
 import StatusDot from '../components/StatusDot';
 import { RobotWorking, RobotDone, NotReceiptBadge } from '../components/RobotScene';
-import { store, load } from '../services/storage';
+import { store, load as storageLoad } from '../services/storage';
 
 // ─── Image Lightbox with pinch-to-zoom ────────────────────────────────────────
 
@@ -287,7 +287,7 @@ export default function ReviewView({ config, onReceiptProcessed, showToast }) {
       if (editing?.fileId === fileId) setEditing(null);
       // Also clean from non-receipt alerts (user-scoped)
       try {
-        const alerts = await load('rr-non-receipt-alerts', []);
+        const alerts = await storageLoad('rr-non-receipt-alerts', []);
         const updated = alerts.filter(a => a.fileId !== fileId);
         await store('rr-non-receipt-alerts', updated);
       } catch {}

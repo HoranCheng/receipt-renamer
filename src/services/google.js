@@ -9,6 +9,9 @@ let gapiLoaded = false;
 let tokenClient = null;
 let _cachedRootFolderId = null;
 
+// Escape single quotes for Drive API query strings
+function escQ(s) { return (s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+
 // ─── Script loader ────────────────────────────────────────────────────────────
 
 function loadScript(src) {
@@ -247,7 +250,7 @@ async function getOrCreateRootFolder() {
   // Search for ALL matching root folders (not just first) to detect duplicates
   const data = await driveReq('GET', '/files', {
     params: {
-      q: `name='${ROOT_FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents`,
+      q: `name='${escQ(ROOT_FOLDER_NAME)}' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents`,
       fields: 'files(id,createdTime)',
       pageSize: 10,
     },
@@ -342,7 +345,7 @@ export async function renameSubFolder(oldName, newName) {
   // First try to find by old name
   const data = await driveReq('GET', '/files', {
     params: {
-      q: `name='${oldName}' and '${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      q: `name='${escQ(oldName)}' and '${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
       fields: 'files(id)',
       pageSize: '1',
     },
@@ -361,7 +364,7 @@ export async function renameSubFolder(oldName, newName) {
   // Old name not found — check if newName already exists (user renamed in Drive manually)
   const existing = await driveReq('GET', '/files', {
     params: {
-      q: `name='${newName}' and '${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      q: `name='${escQ(newName)}' and '${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
       fields: 'files(id)',
       pageSize: '1',
     },
@@ -400,7 +403,7 @@ export async function findOrCreateFolder(name) {
   // Search for ALL matching folders to detect duplicates
   const data = await driveReq('GET', '/files', {
     params: {
-      q: `name='${name}' and '${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      q: `name='${escQ(name)}' and '${rootId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
       fields: 'files(id,createdTime)',
       pageSize: 10,
     },
@@ -622,7 +625,7 @@ export async function readCloudConfig() {
     const rootId = await getOrCreateRootFolder();
     const data = await driveReq('GET', '/files', {
       params: {
-        q: `name='${CONFIG_FILE_NAME}' and '${rootId}' in parents and trashed=false`,
+        q: `name='${escQ(CONFIG_FILE_NAME)}' and '${rootId}' in parents and trashed=false`,
         fields: 'files(id)',
         pageSize: 1,
       },
@@ -646,7 +649,7 @@ export async function saveCloudConfig(configData) {
     // Check if config file already exists
     const data = await driveReq('GET', '/files', {
       params: {
-        q: `name='${CONFIG_FILE_NAME}' and '${rootId}' in parents and trashed=false`,
+        q: `name='${escQ(CONFIG_FILE_NAME)}' and '${rootId}' in parents and trashed=false`,
         fields: 'files(id)',
         pageSize: 1,
       },

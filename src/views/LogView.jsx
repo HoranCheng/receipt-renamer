@@ -437,7 +437,7 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
                 animation: 'scaleIn 0.15s ease',
               }}>
                 <button
-                  onClick={() => { exportCSV(receipts); setShowExport(false); }}
+                  onClick={() => { exportCSV(activeReceipts); setShowExport(false); }}
                   style={{
                     display: 'block', width: '100%',
                     padding: '12px 16px',
@@ -450,7 +450,7 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
                   📊 导出 CSV
                 </button>
                 <button
-                  onClick={() => { exportJSON(receipts); setShowExport(false); }}
+                  onClick={() => { exportJSON(activeReceipts); setShowExport(false); }}
                   style={{
                     display: 'block', width: '100%',
                     padding: '12px 16px',

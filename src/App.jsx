@@ -486,9 +486,15 @@ export default function App() {
     clearAllData();
     setConfig(DEFAULT_CONFIG);
     setReceipts([]);
-    // Also clear IndexedDB caches
+    // Also clear IndexedDB caches (both scoped and unscoped)
     try {
-      const dbs = ['rr-image-cache', 'rr-pending-uploads', 'rr-sw-queue'];
+      const userId = localStorage.getItem('rr-current-user') || '';
+      const dbs = ['rr-sw-queue']; // Unscoped
+      if (userId) {
+        dbs.push(`rr-image-cache::${userId}`, `rr-pending-uploads::${userId}`);
+      }
+      // Also try unscoped names for legacy
+      dbs.push('rr-image-cache', 'rr-pending-uploads');
       dbs.forEach(name => indexedDB.deleteDatabase(name));
     } catch {}
   };

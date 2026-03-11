@@ -192,7 +192,7 @@ export default function InboxView({ config, onProcessed }) {
     <div style={{ padding: '0 16px 100px' }}>
       <Header
         title={'Drive \u6536\u4EF6\u7BB1'}
-        sub={`${config.inboxFolder || '00_inbox'} \u00B7 ${files.length} \u4E2A\u6587\u4EF6`}
+        sub={`${config.inboxFolder || '小票待处理'} \u00B7 ${files.length} \u4E2A\u6587\u4EF6`}
       />
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
