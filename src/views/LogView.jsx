@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { T, F, FM } from '../constants/theme';
 import { CAT_ICON, CAT_CLR } from '../constants';
-import { readSheetRecords } from '../services/google';
+import { readSheetRecords, appendToSheet } from '../services/google';
 import Header from '../components/Header';
 import { haptic } from '../utils/haptics';
 
@@ -142,7 +142,7 @@ function DonutChart({ receipts, periodLabel }) {
           pointerEvents: 'none',
         }}>
           <span style={{ fontSize: 18, fontWeight: 800, color: T.tx, fontFamily: FM, lineHeight: 1 }}>
-            ${totalAll.toFixed(0)}
+            ${totalAll.toFixed(2)}
           </span>
           <span style={{ fontSize: 10, color: T.tx3, fontFamily: F, marginTop: 2 }}>{periodLabel || '合计'}</span>
         </div>
@@ -166,7 +166,7 @@ function DonutChart({ receipts, periodLabel }) {
             fontWeight: 600,
             whiteSpace: 'nowrap',
           }}>
-            {CAT_ICON[cat]} {cat} ${total.toFixed(0)}
+            {CAT_ICON[cat]} {cat} ${total.toFixed(2)}
           </div>
         ))}
       </div>
@@ -290,30 +290,42 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
   const [showExport, setShowExport] = useState(false);
   const [sheetRecords, setSheetRecords] = useState(null); // null = not loaded, [] = empty
   const [sheetLoading, setSheetLoading] = useState(false);
-  const [syncSource, setSyncSource] = useState('local'); // 'local' | 'cloud'
+  const [syncSource, setSyncSource] = useState('cloud'); // default: cloud is source of truth
+  const [localOnlyItems, setLocalOnlyItems] = useState(null); // items in local but not cloud
+  const [showSyncPrompt, setShowSyncPrompt] = useState(false);
 
-  // Fetch records from Sheets for multi-device sync
+  // Fetch records from Sheets — cloud is the source of truth
   useEffect(() => {
     if (config?.sheetId && config?.connected) {
       setSheetLoading(true);
       readSheetRecords(config.sheetId, config.sheetName || 'receipt_index')
         .then(records => {
           setSheetRecords(records);
-          // Auto-switch to cloud view if local is empty but cloud has data
-          if (receipts.length === 0 && records.length > 0) {
-            setSyncSource('cloud');
+          // Check for local-only items (in local but not in cloud)
+          if (receipts.length > 0 && records != null) {
+            const cloudDates = new Set(records.map(r => `${r.date}|${r.merchant}|${r.amount}`));
+            const onlyLocal = receipts.filter(r => !cloudDates.has(`${r.date}|${r.merchant}|${r.amount}`));
+            if (onlyLocal.length > 0) {
+              setLocalOnlyItems(onlyLocal);
+              setShowSyncPrompt(true);
+            }
           }
           setSheetLoading(false);
         })
         .catch(e => {
           console.warn('Sheets sync failed:', e);
+          // Fallback to local if cloud fails
+          setSyncSource('local');
           setSheetLoading(false);
         });
+    } else {
+      // No sheet configured — use local
+      setSyncSource('local');
     }
   }, [config?.sheetId, refreshKey]);
 
-  // Use the selected data source
-  const activeReceipts = syncSource === 'cloud' && sheetRecords ? sheetRecords : receipts;
+  // Use cloud by default, local only as fallback
+  const activeReceipts = (syncSource === 'cloud' && sheetRecords != null) ? sheetRecords : receipts;
 
   // Apply time filter first, then category + search
   const timeFiltered = filterByTime(activeReceipts, timePeriod);
@@ -336,8 +348,61 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
     }))
     .sort((a, b) => b.total - a.total);
 
+  // Handle merging local-only items to cloud
+  const handleMergeToCloud = async () => {
+    if (!localOnlyItems?.length || !config?.sheetId) return;
+    try {
+      for (const r of localOnlyItems) {
+        const link = r.driveId ? `https://drive.google.com/file/d/${r.driveId}/view` : '';
+        await appendToSheet(config.sheetId, config.sheetName || 'receipt_index', [
+          r.date, r.merchant, r.category, r.amount, r.currency || 'AUD', link,
+        ]);
+      }
+      setShowSyncPrompt(false);
+      setLocalOnlyItems(null);
+      // Re-fetch cloud data
+      const records = await readSheetRecords(config.sheetId, config.sheetName || 'receipt_index');
+      setSheetRecords(records);
+    } catch (e) {
+      console.warn('Merge to cloud failed:', e);
+    }
+  };
+
+  const handleDiscardLocal = () => {
+    setShowSyncPrompt(false);
+    setLocalOnlyItems(null);
+  };
+
   return (
     <div style={{ padding: '0 16px 100px' }}>
+      {/* Local-only data sync prompt */}
+      {showSyncPrompt && localOnlyItems?.length > 0 && (
+        <div style={{
+          background: 'rgba(250,204,21,0.08)',
+          border: '1px solid rgba(250,204,21,0.25)',
+          borderRadius: 14, padding: '12px 14px', marginBottom: 12,
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: T.tx, fontFamily: F, marginBottom: 6 }}>
+            发现 {localOnlyItems.length} 条本地记录不在云端
+          </div>
+          <div style={{ fontSize: 11, color: T.tx3, marginBottom: 10 }}>
+            这些记录存在本地但 Google Sheets 里没有。怎么处理？
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleMergeToCloud} style={{
+              flex: 1, padding: '8px 0', borderRadius: 10, border: 'none',
+              background: T.acc, color: '#000', fontSize: 12, fontWeight: 700,
+              fontFamily: F, cursor: 'pointer',
+            }}>合并到云端</button>
+            <button onClick={handleDiscardLocal} style={{
+              flex: 1, padding: '8px 0', borderRadius: 10,
+              border: `1px solid ${T.bdr}`, background: 'transparent',
+              color: T.tx2, fontSize: 12, fontWeight: 600,
+              fontFamily: F, cursor: 'pointer',
+            }}>忽略本地</button>
+          </div>
+        </div>
+      )}
       {/* Header row with export menu */}
       <div style={{ position: 'relative' }}>
         <Header title="消费记录" sub={`${timeFiltered.length} 张 · $${totalAll.toFixed(2)} · ${periodSub(timePeriod)}`} />
