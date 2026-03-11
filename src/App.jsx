@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { T, F } from './constants/theme';
 import { DEFAULT_CONFIG } from './constants';
 import {
@@ -21,6 +21,7 @@ import { store, load, setCurrentUser, clearCurrentUserData, clearAllData } from 
 import { css } from './styles';
 import Nav from './components/Nav';
 import ErrorBoundary from './components/ErrorBoundary';
+import { useToast } from './components/Toast';
 import SetupView from './views/SetupView';
 import DashView from './views/DashView';
 import { RobotWorking } from './components/RobotScene';
@@ -54,6 +55,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [reviewCount, setReviewCount] = useState(0); // T-014: badge for review tab
   const [configConflict, setConfigConflict] = useState(null); // { cloud, local, fields[] }
+  const { showToast, ToastContainer } = useToast();
 
   useEffect(() => {
     (async () => {
@@ -280,12 +282,21 @@ export default function App() {
     setConfigConflict(null);
   };
 
+  const _prevProcessing = useRef(false);
   const handleProcStatus = (status) => {
     setProcStatus(status);
     // T-014: update review count from processing results
     if (status.review > 0) {
       setReviewCount(prev => prev + status.review);
     }
+    // Toast when batch processing finishes
+    if (_prevProcessing.current && !status.processing && status.total > 0) {
+      const msg = status.failed > 0
+        ? `处理完成：${status.done} 张成功，${status.failed} 张失败`
+        : `全部处理完成 🎉 共 ${status.done} 张`;
+      showToast(msg, status.failed > 0 ? 'warn' : 'success', 4000);
+    }
+    _prevProcessing.current = status.processing;
   };
 
   const triggerProcessing = (cfg) => {
@@ -361,6 +372,14 @@ export default function App() {
     const updated = [r, ...receipts];
     setReceipts(updated);
     await store('rr-receipts', updated);
+    // Toast: AI recognition complete
+    const merchant = r.merchant || '未知商家';
+    const amount = r.amount ? ` $${parseFloat(r.amount).toFixed(2)}` : '';
+    if (r.status === 'validated') {
+      showToast(`${merchant}${amount} 已识别归档 📂`, 'success');
+    } else if (r.status === 'review') {
+      showToast(`${merchant}${amount} 需要人工审核 👀`, 'warn');
+    }
   };
 
   const deleteReceipt = async (id) => {
@@ -476,6 +495,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
+      <ToastContainer />
       <div
         style={{
           minHeight: '100vh',
@@ -639,6 +659,7 @@ export default function App() {
             procStatus={procStatus}
             onStatusChange={handleProcStatus}
             onReceiptProcessed={addReceipt}
+            showToast={showToast}
           />
         )}
         {view === 'review' && <ReviewView config={config} />}

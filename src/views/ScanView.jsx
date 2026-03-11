@@ -97,7 +97,7 @@ async function compressImage(file, maxWidth = 1280, quality = 0.82) {
   });
 }
 
-export default function ScanView({ onUploaded, onSync, procStatus, config, onStatusChange, onReceiptProcessed }) {
+export default function ScanView({ onUploaded, onSync, procStatus, config, onStatusChange, onReceiptProcessed, showToast }) {
   // items: { id, name, status, retries, error, previewUrl, fromIndexedDB, fileBlob }
   const [items, setItems] = useState([]);
   const [storageAlert, setStorageAlert] = useState(null); // null | { level:'warn'|'crit', totalBytes, count, hasStale }
@@ -249,12 +249,20 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
 
     processingRef.current = false;
     if (uploadedAny) {
+      // Count results
+      const doneItems = queueRef.current.filter(it => it.status === 'done').length;
+      const failItems = queueRef.current.filter(it => it.status === 'failed').length;
+      if (failItems > 0) {
+        showToast?.(`上传完成：${doneItems} 张成功，${failItems} 张失败`, 'warn');
+      } else if (doneItems > 0) {
+        showToast?.(`${doneItems} 张照片已上传到 Drive ☁️`, 'success');
+      }
       onUploaded?.();
       // Re-check storage health after uploads complete
       const stats = await getPendingStats();
       if (stats.count === 0) setStorageAlert(null);
     }
-  }, [config, updateItem, onUploaded]);
+  }, [config, updateItem, onUploaded, showToast]);
 
   const handleFiles = useCallback(async (fileList) => {
     if (!fileList?.length) return;
