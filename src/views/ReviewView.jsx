@@ -101,15 +101,21 @@ function Lightbox({ src, onClose }) {
         }}
         draggable={false}
       />
-      {/* Close button */}
+      {/* Close button — larger tap target for mobile */}
       <button onClick={onClose} style={{
-        position: 'absolute', top: 16, right: 16,
-        width: 36, height: 36, borderRadius: '50%',
-        background: 'rgba(255,255,255,0.15)', border: 'none',
-        color: '#fff', fontSize: 18, cursor: 'pointer',
+        position: 'absolute', top: 12, right: 12,
+        width: 48, height: 48, borderRadius: '50%',
+        background: 'rgba(255,255,255,0.2)', border: 'none',
+        color: '#fff', fontSize: 22, cursor: 'pointer',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        backdropFilter: 'blur(8px)',
+        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        zIndex: 601,
       }}>✕</button>
+      {/* Swipe-down hint */}
+      <div style={{
+        position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)',
+        fontSize: 12, color: 'rgba(255,255,255,0.5)',
+      }}>点击空白处关闭</div>
       {/* Zoom hint */}
       {scale === 1 && (
         <div style={{
@@ -146,19 +152,29 @@ export default function ReviewView({ config, onReceiptProcessed }) {
   const load = async () => {
     setLoading(true);
     try {
-      const [reviewId, validId] = await Promise.all([
+      const [reviewId, validId, inboxId] = await Promise.all([
         findOrCreateFolder(config.reviewFolder || '小票待确认'),
         findOrCreateFolder(config.validatedFolder || '小票已存档'),
+        findOrCreateFolder(config.inboxFolder || '小票待处理'),
       ]);
       setReviewFolderId(reviewId);
       setValidFolderId(validId);
-      const { files: driveFiles } = await listFilesInFolder(reviewId);
-      const enriched = driveFiles.map((f) => {
+      // Load from both review folder and inbox (unprocessed files)
+      const [reviewResult, inboxResult] = await Promise.all([
+        listFilesInFolder(reviewId),
+        listFilesInFolder(inboxId),
+      ]);
+      const enrichReview = reviewResult.files.map((f) => {
         let aiData = {};
         try { aiData = JSON.parse(f.description || '{}'); } catch {}
-        return { ...f, aiData };
+        return { ...f, aiData, source: 'review' };
       });
-      setFiles(enriched);
+      const enrichInbox = inboxResult.files.map((f) => {
+        let aiData = {};
+        try { aiData = JSON.parse(f.description || '{}'); } catch {}
+        return { ...f, aiData, source: 'inbox' };
+      });
+      setFiles([...enrichInbox, ...enrichReview]);
     } catch (e) {
       const msg = e.message || '';
       if (msg.includes('重新登录') || msg.includes('authentication') || msg.includes('401')) {

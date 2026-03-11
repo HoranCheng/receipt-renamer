@@ -28,14 +28,14 @@ export default function InboxView({ config, onProcessed }) {
     setLoading(true);
     try {
       const inboxId = await findOrCreateFolder(
-        config.inboxFolder || '00_inbox'
+        config.inboxFolder || '小票待处理'
       );
       inboxIdRef.current = inboxId;
       validIdRef.current = await findOrCreateFolder(
-        config.validatedFolder || '10_validated'
+        config.validatedFolder || '小票已存档'
       );
       reviewIdRef.current = await findOrCreateFolder(
-        config.reviewFolder || '20_review_needed'
+        config.reviewFolder || '小票待确认'
       );
       const result = await listFilesInFolder(inboxId);
       setFiles(result.files);

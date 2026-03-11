@@ -98,6 +98,79 @@ async function compressImage(file, maxWidth = 1280, quality = 0.82) {
   });
 }
 
+function QueueItem({ item: it, onRetry }) {
+  const [expanded, setExpanded] = useState(false);
+  const isFailed = it.status === 'failed';
+
+  return (
+    <div>
+      <div
+        onClick={() => isFailed && setExpanded(e => !e)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '8px 10px', borderRadius: expanded ? '12px 12px 0 0' : 12,
+          background: isFailed ? 'rgba(248,113,113,0.06)'
+            : it.status === 'done' ? 'rgba(52,211,153,0.06)' : T.sf2,
+          cursor: isFailed ? 'pointer' : 'default',
+          transition: 'border-radius 0.15s',
+        }}
+      >
+        {it.previewUrl ? (
+          <img src={it.previewUrl} alt="" style={{
+            width: 44, height: 44, borderRadius: 9, objectFit: 'cover', flexShrink: 0,
+            border: `1px solid ${T.bdr}`,
+          }} />
+        ) : (
+          <div style={{
+            width: 44, height: 44, borderRadius: 9, background: T.sf,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0,
+          }}>🧾</div>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: T.tx, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {it.name}
+          </div>
+          <div style={{ fontSize: 10, color: isFailed ? T.red : T.tx3, marginTop: 2 }}>
+            {it.status === 'done' && '✅ 已上传到 Drive'}
+            {it.status === 'uploading' && `上传中${it.retries > 0 ? `（第 ${it.retries + 1} 次重试）` : '…'}`}
+            {it.status === 'queued' && '等待上传…'}
+            {isFailed && `❌ 失败 · 点击查看详情`}
+          </div>
+        </div>
+        <ProgressRing status={it.status} />
+      </div>
+      {/* Expanded detail for failed items */}
+      {expanded && isFailed && (
+        <div style={{
+          background: 'rgba(248,113,113,0.04)',
+          border: '1px solid rgba(248,113,113,0.15)',
+          borderTop: 'none',
+          borderRadius: '0 0 12px 12px',
+          padding: '10px 12px',
+        }}>
+          <div style={{ fontSize: 11, color: T.tx2, marginBottom: 8, lineHeight: 1.5 }}>
+            <strong style={{ color: T.red }}>错误原因：</strong>{it.error || '网络错误或服务不可用'}
+          </div>
+          {it.previewUrl && (
+            <img src={it.previewUrl} alt="" style={{
+              width: '100%', maxHeight: 200, objectFit: 'contain',
+              borderRadius: 8, marginBottom: 10,
+              border: `1px solid ${T.bdr}`,
+            }} />
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={(e) => { e.stopPropagation(); onRetry(); }} style={{
+              flex: 1, padding: '8px 0', borderRadius: 10, border: 'none',
+              background: T.acc, color: '#000', fontSize: 12, fontWeight: 700,
+              fontFamily: F, cursor: 'pointer',
+            }}>↩ 重试上传</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ScanView({ onUploaded, onSync, procStatus, config, onStatusChange, onReceiptProcessed, showToast, liveResults }) {
   // items: { id, name, status, retries, error, previewUrl, fromIndexedDB, fileBlob }
   const [items, setItems] = useState([]);
@@ -334,6 +407,11 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
     processQueue(config?.inboxFolder || 'Inbox');
   }, [config, updateItem, processQueue]);
 
+  const retryOne = useCallback(async (id) => {
+    updateItem(id, { status: 'queued', error: '' });
+    processQueue(config?.inboxFolder || 'Inbox');
+  }, [config, updateItem, processQueue]);
+
   const clearDone = useCallback(() => {
     const remaining = queueRef.current.filter(it => it.status !== 'done');
     // Revoke object URLs for done items
@@ -551,39 +629,7 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             {items.filter(it => it.status !== 'wifi_blocked').map(it => (
-              <div key={it.id} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                padding: '8px 10px', borderRadius: 12,
-                background: it.status === 'failed' ? 'rgba(248,113,113,0.06)'
-                  : it.status === 'done' ? 'rgba(52,211,153,0.06)' : T.sf2,
-              }}>
-                {/* Thumbnail */}
-                {it.previewUrl ? (
-                  <img src={it.previewUrl} alt="" style={{
-                    width: 44, height: 44, borderRadius: 9, objectFit: 'cover', flexShrink: 0,
-                    border: `1px solid ${T.bdr}`,
-                  }} />
-                ) : (
-                  <div style={{
-                    width: 44, height: 44, borderRadius: 9, background: T.sf,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0,
-                  }}>🧾</div>
-                )}
-                {/* Info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: T.tx, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {it.name}
-                  </div>
-                  <div style={{ fontSize: 10, color: it.status === 'failed' ? T.red : T.tx3, marginTop: 2 }}>
-                    {it.status === 'done' && '✅ 已上传到 Drive'}
-                    {it.status === 'uploading' && `上传中${it.retries > 0 ? `（第 ${it.retries + 1} 次重试）` : '…'}`}
-                    {it.status === 'queued' && '等待上传…'}
-                    {it.status === 'failed' && `失败：${it.error || '网络错误'}`}
-                  </div>
-                </div>
-                {/* Progress ring */}
-                <ProgressRing status={it.status} />
-              </div>
+              <QueueItem key={it.id} item={it} onRetry={() => retryOne(it.id)} />
             ))}
           </div>
         </div>
