@@ -63,3 +63,11 @@ export function resumeSWProcessing() {
 export function isSWAvailable() {
   return !!navigator.serviceWorker?.controller;
 }
+
+/** Clear the token stored in SW (call on sign-out) */
+export function clearSWToken() {
+  navigator.serviceWorker?.controller?.postMessage({
+    type: 'set-token',
+    data: { token: null },
+  });
+}

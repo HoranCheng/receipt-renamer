@@ -14,7 +14,7 @@ import {
   saveCloudConfig,
 } from './services/google';
 import { processInboxBackground, getSavedProgress } from './services/processor';
-import { sendTokenToSW, onSWMessage, resumeSWProcessing } from './services/swBridge';
+import { sendTokenToSW, onSWMessage, resumeSWProcessing, clearSWToken } from './services/swBridge';
 import { store, load, setCurrentUser, clearCurrentUserData, clearAllData } from './services/storage';
 import { css } from './styles';
 import Nav from './components/Nav';
@@ -86,7 +86,7 @@ export default function App() {
                 await requestAccessToken({
                   prompt: '',
                   loginHint: email,
-                  persistent: mergedConfig.rememberMe,
+                  persistent: false,
                 });
               } catch {
                 console.info('Silent token refresh failed — will prompt on next action');
@@ -288,7 +288,7 @@ export default function App() {
         await requestAccessToken({
           prompt: '',
           loginHint: config.googleProfile?.email,
-          persistent: config.rememberMe,
+          persistent: false,
         });
         // Auth succeeded silently — update state
         let googleProfile = config.googleProfile;
@@ -352,11 +352,12 @@ export default function App() {
     navTo('dash');
   };
 
-  const handleReconnect = async (persistent = false) => {
+  const handleReconnect = async () => {
     try {
       const effectiveClientId = BUILT_IN_CLIENT_ID || config.clientId;
       if (!isGapiLoaded()) await initGoogleAPI(effectiveClientId);
-      await requestAccessToken({ persistent });
+      // persistent=false: token in sessionStorage only; Google session cookie handles cross-session restore
+      await requestAccessToken({ persistent: false });
       // Fetch profile (name, email, avatar) right after auth
       let googleProfile = config.googleProfile || null;
       try {
@@ -380,6 +381,7 @@ export default function App() {
 
   const handleSignOut = async () => {
     signOut();
+    clearSWToken(); // Immediately clear token from SW memory
     // Don't clear user data on sign-out — it stays scoped by user ID.
     // When another user logs in, they get their own scoped data.
     const updated = { ...config, connected: false };

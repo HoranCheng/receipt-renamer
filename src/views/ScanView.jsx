@@ -57,8 +57,9 @@ function ProgressRing({ status }) {
 }
 
 const MAX_RETRIES = 3;
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB per file
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file (aligned with AI service limit)
+// Only formats validated across the full chain (select → compress → preview → base64 → AI)
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
 
 /** Compress an image file on device. Returns compressed Blob or original if compression fails/isn't needed. */
 async function compressImage(file, maxWidth = 1280, quality = 0.82) {
@@ -264,11 +265,11 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
     const files = [];
     for (const file of rawFiles) {
       if (file.size > MAX_FILE_SIZE) {
-        alert(`文件 "${file.name}" 太大（${(file.size / 1024 / 1024).toFixed(1)}MB），最大支持 20MB`);
+        alert(`文件 "${file.name}" 太大（${(file.size / 1024 / 1024).toFixed(1)}MB），最大支持 10MB。可在设置中开启"上传前压缩"来缩小文件。`);
         continue;
       }
       if (file.type && !ALLOWED_TYPES.includes(file.type)) {
-        alert(`文件 "${file.name}" 类型不支持（${file.type}）。支持：JPEG、PNG、WebP、HEIC、PDF`);
+        alert(`文件 "${file.name}" 类型不支持（${file.type}）。目前支持：JPEG、PNG、PDF`);
         continue;
       }
       files.push(file);

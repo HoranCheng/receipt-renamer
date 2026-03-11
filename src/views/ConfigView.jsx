@@ -55,7 +55,8 @@ export default function ConfigView({
   const [creatingSheet, setCreatingSheet] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
+  // Remember-me removed: rely on Google's native session persistence.
+  // Token is always saved to sessionStorage; Google session cookie handles cross-session restore.
   const [folderEdit, setFolderEdit] = useState({});
 
   const save = async () => {
@@ -106,38 +107,16 @@ export default function ConfigView({
             </div>
           </>
         ) : (
-          /* Not connected — show connect button + remember me checkbox */
+          /* Not connected — show connect button */
           <>
             <div style={{ fontSize: 12, color: T.tx3, marginBottom: 14, lineHeight: 1.6 }}>
               连接 Google 账号后才能上传小票到 Drive 和记录消费数据。
+              <br />
+              <span style={{ fontSize: 11, color: T.tx3 }}>
+                登录状态由 Google 自动保持，关闭浏览器后通常无需重新登录。
+              </span>
             </div>
-            {/* Remember me checkbox */}
-            <label style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '10px 12px', marginBottom: 12,
-              background: T.sf2, borderRadius: 12, cursor: 'pointer',
-              border: `1px solid ${rememberMe ? 'rgba(250,204,21,0.3)' : T.bdr}`,
-              transition: 'border-color 0.15s',
-            }}>
-              <div style={{
-                width: 20, height: 20, borderRadius: 6, flexShrink: 0,
-                border: `2px solid ${rememberMe ? T.acc : T.bdr2}`,
-                background: rememberMe ? T.acc : 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'all 0.15s',
-              }}>
-                {rememberMe && <span style={{ color: '#000', fontSize: 12, fontWeight: 800, lineHeight: 1 }}>✓</span>}
-              </div>
-              <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)}
-                style={{ display: 'none' }} />
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: T.tx }}>记住我的登录状态</div>
-                <div style={{ fontSize: 11, color: T.tx3, marginTop: 1 }}>
-                  关闭浏览器再打开也不用重新登录
-                </div>
-              </div>
-            </label>
-            <Btn primary full onClick={() => onReconnect(rememberMe)}>
+            <Btn primary full onClick={() => onReconnect()}>
               🔗 连接 Google 账号
             </Btn>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 10 }}>

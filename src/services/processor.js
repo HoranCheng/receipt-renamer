@@ -31,9 +31,16 @@ function safeName(s) {
 
 // ─── Sheets failure outbox (retry later) ──────────────────────────────────────
 
+function _getOutboxKey() {
+  try {
+    const userId = localStorage.getItem('rr-current-user');
+    return userId ? `rr-sheets-outbox::${userId}` : 'rr-sheets-outbox';
+  } catch { return 'rr-sheets-outbox'; }
+}
+
 function _logSheetFailure(fileId, row, sheetId) {
   try {
-    const key = 'rr-sheets-outbox';
+    const key = _getOutboxKey();
     const outbox = JSON.parse(localStorage.getItem(key) || '[]');
     outbox.push({
       fileId, row, sheetId,
@@ -48,7 +55,7 @@ function _logSheetFailure(fileId, row, sheetId) {
 /** Retry any failed Sheets writes from the outbox */
 export async function retrySheetOutbox() {
   try {
-    const key = 'rr-sheets-outbox';
+    const key = _getOutboxKey();
     const outbox = JSON.parse(localStorage.getItem(key) || '[]');
     if (!outbox.length) return;
     const remaining = [];
@@ -147,8 +154,9 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
     const confidence = data.confidence || 0;
     const ext = file.name.split('.').pop() || 'jpg';
     const safeDate = fmtDate(data.date);
-    const safeCategory = safeName(data.category || 'Other');
-    const newName = `${safeDate} ${safeCategory}.${ext}`;
+    const safeMerchant = safeName(toTitleCase(data.merchant || 'Unknown'));
+    const safeAmount = parseFloat(data.amount || 0).toFixed(2);
+    const newName = `${safeDate} ${safeMerchant} ${safeAmount}.${ext}`;
 
     const receiptRecord = {
       id: file.id,

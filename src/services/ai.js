@@ -1,9 +1,9 @@
 const PROXY_URL = import.meta.env.VITE_AI_PROXY_URL || '';
 
-// SECURITY: Max payload size for AI requests (10MB base64 ≈ ~7.5MB file)
-const MAX_BASE64_SIZE = 10 * 1024 * 1024;
-// Allowed MIME types for receipt analysis
-const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf'];
+// Max payload size for AI requests (base64 of a 10MB file is ~13.3MB)
+const MAX_BASE64_SIZE = 14 * 1024 * 1024;
+// Allowed MIME types — only formats validated across the full pipeline
+const ALLOWED_MIME = ['image/jpeg', 'image/png', 'application/pdf'];
 
 // ─── Proxy mode (Gemini 2.0 Flash via receipt-proxy Worker) ──────────────────
 
@@ -55,7 +55,7 @@ export async function analyzeReceipt(base64, mediaType, fileType = 'image') {
     throw new Error(`文件过大（${(base64.length / 1024 / 1024).toFixed(1)}MB），最大支持 ${MAX_BASE64_SIZE / 1024 / 1024}MB`);
   }
   if (!ALLOWED_MIME.includes(mediaType)) {
-    throw new Error(`不支持的文件类型：${mediaType}。支持：JPEG、PNG、WebP、HEIC、PDF`);
+    throw new Error(`不支持的文件类型：${mediaType}。目前支持：JPEG、PNG、PDF`);
   }
   return analyzeViaProxy(base64, mediaType, fileType);
 }

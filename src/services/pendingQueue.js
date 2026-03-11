@@ -4,13 +4,21 @@
  * Used when WiFi-only mode is on and device is on cellular.
  */
 
-const DB_NAME = 'rr-pending-uploads';
+const BASE_DB_NAME = 'rr-pending-uploads';
 const STORE = 'items';
 const DB_VERSION = 1;
 
+/** Get user-scoped DB name. Falls back to unscoped for backwards compat. */
+function getDBName() {
+  try {
+    const userId = localStorage.getItem('rr-current-user');
+    return userId ? `${BASE_DB_NAME}::${userId}` : BASE_DB_NAME;
+  } catch { return BASE_DB_NAME; }
+}
+
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(getDBName(), DB_VERSION);
     req.onupgradeneeded = (e) => {
       e.target.result.createObjectStore(STORE, { keyPath: 'id' });
     };

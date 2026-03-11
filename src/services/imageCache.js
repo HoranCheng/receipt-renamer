@@ -9,13 +9,21 @@
  *   5. User approves or deletes in ReviewView → cache entry deleted
  */
 
-const DB_NAME = 'rr-image-cache';
+const BASE_DB_NAME = 'rr-image-cache';
 const STORE = 'blobs';
 const DB_VERSION = 1;
 
+/** Get user-scoped DB name. Falls back to unscoped for backwards compat. */
+function getDBName() {
+  try {
+    const userId = localStorage.getItem('rr-current-user');
+    return userId ? `${BASE_DB_NAME}::${userId}` : BASE_DB_NAME;
+  } catch { return BASE_DB_NAME; }
+}
+
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(getDBName(), DB_VERSION);
     req.onupgradeneeded = (e) => {
       e.target.result.createObjectStore(STORE, { keyPath: 'id' });
     };
