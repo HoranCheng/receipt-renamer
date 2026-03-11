@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { T, F, FM } from '../constants/theme';
 import { CAT_ICON, CAT_CLR } from '../constants';
-import { readSheetRecords, appendToSheet } from '../services/google';
+import { readSheetRecords } from '../services/google';
 import Header from '../components/Header';
 import { haptic } from '../utils/haptics';
 
@@ -290,42 +290,31 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
   const [showExport, setShowExport] = useState(false);
   const [sheetRecords, setSheetRecords] = useState(null); // null = not loaded, [] = empty
   const [sheetLoading, setSheetLoading] = useState(false);
-  const [syncSource, setSyncSource] = useState('cloud'); // default: cloud is source of truth
-  const [localOnlyItems, setLocalOnlyItems] = useState(null); // items in local but not cloud
-  const [showSyncPrompt, setShowSyncPrompt] = useState(false);
+  const [loadError, setLoadError] = useState(null);
 
-  // Fetch records from Sheets — cloud is the source of truth
+  // Always fetch from Sheets — Drive/Sheets is the single source of truth
+  const fetchRecords = () => {
+    if (!config?.sheetId || !config?.connected) return;
+    setSheetLoading(true);
+    setLoadError(null);
+    readSheetRecords(config.sheetId, config.sheetName || 'receipt_index')
+      .then(records => {
+        setSheetRecords(records || []);
+        setSheetLoading(false);
+      })
+      .catch(e => {
+        console.warn('Sheets read failed:', e);
+        setLoadError(e.message || '读取失败');
+        setSheetLoading(false);
+      });
+  };
+
   useEffect(() => {
-    if (config?.sheetId && config?.connected) {
-      setSheetLoading(true);
-      readSheetRecords(config.sheetId, config.sheetName || 'receipt_index')
-        .then(records => {
-          setSheetRecords(records);
-          // Check for local-only items (in local but not in cloud)
-          if (receipts.length > 0 && records != null) {
-            const cloudDates = new Set(records.map(r => `${r.date}|${r.merchant}|${r.amount}`));
-            const onlyLocal = receipts.filter(r => !cloudDates.has(`${r.date}|${r.merchant}|${r.amount}`));
-            if (onlyLocal.length > 0) {
-              setLocalOnlyItems(onlyLocal);
-              setShowSyncPrompt(true);
-            }
-          }
-          setSheetLoading(false);
-        })
-        .catch(e => {
-          console.warn('Sheets sync failed:', e);
-          // Fallback to local if cloud fails
-          setSyncSource('local');
-          setSheetLoading(false);
-        });
-    } else {
-      // No sheet configured — use local
-      setSyncSource('local');
-    }
-  }, [config?.sheetId, refreshKey]);
+    fetchRecords();
+  }, [config?.sheetId, config?.connected, refreshKey]);
 
-  // Use cloud by default, local only as fallback
-  const activeReceipts = (syncSource === 'cloud' && sheetRecords != null) ? sheetRecords : receipts;
+  // Cloud data is the truth; only use local as instant placeholder while loading
+  const activeReceipts = sheetRecords != null ? sheetRecords : receipts;
 
   // Apply time filter first, then category + search
   const timeFiltered = filterByTime(activeReceipts, timePeriod);
@@ -348,59 +337,22 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
     }))
     .sort((a, b) => b.total - a.total);
 
-  // Handle merging local-only items to cloud
-  const handleMergeToCloud = async () => {
-    if (!localOnlyItems?.length || !config?.sheetId) return;
-    try {
-      for (const r of localOnlyItems) {
-        const link = r.driveId ? `https://drive.google.com/file/d/${r.driveId}/view` : '';
-        await appendToSheet(config.sheetId, config.sheetName || 'receipt_index', [
-          r.date, r.merchant, r.category, r.amount, r.currency || 'AUD', link,
-        ]);
-      }
-      setShowSyncPrompt(false);
-      setLocalOnlyItems(null);
-      // Re-fetch cloud data
-      const records = await readSheetRecords(config.sheetId, config.sheetName || 'receipt_index');
-      setSheetRecords(records);
-    } catch (e) {
-      console.warn('Merge to cloud failed:', e);
-    }
-  };
-
-  const handleDiscardLocal = () => {
-    setShowSyncPrompt(false);
-    setLocalOnlyItems(null);
-  };
-
   return (
     <div style={{ padding: '0 16px 100px' }}>
-      {/* Local-only data sync prompt */}
-      {showSyncPrompt && localOnlyItems?.length > 0 && (
+      {/* Error banner */}
+      {loadError && (
         <div style={{
-          background: 'rgba(250,204,21,0.08)',
-          border: '1px solid rgba(250,204,21,0.25)',
+          background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.25)',
           borderRadius: 14, padding: '12px 14px', marginBottom: 12,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: T.tx, fontFamily: F, marginBottom: 6 }}>
-            发现 {localOnlyItems.length} 条本地记录不在云端
-          </div>
-          <div style={{ fontSize: 11, color: T.tx3, marginBottom: 10 }}>
-            这些记录存在本地但 Google Sheets 里没有。怎么处理？
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={handleMergeToCloud} style={{
-              flex: 1, padding: '8px 0', borderRadius: 10, border: 'none',
-              background: T.acc, color: '#000', fontSize: 12, fontWeight: 700,
-              fontFamily: F, cursor: 'pointer',
-            }}>合并到云端</button>
-            <button onClick={handleDiscardLocal} style={{
-              flex: 1, padding: '8px 0', borderRadius: 10,
-              border: `1px solid ${T.bdr}`, background: 'transparent',
-              color: T.tx2, fontSize: 12, fontWeight: 600,
-              fontFamily: F, cursor: 'pointer',
-            }}>忽略本地</button>
-          </div>
+          <div style={{ fontSize: 12, color: T.red }}>⚠️ {loadError}</div>
+          <button onClick={fetchRecords} style={{
+            padding: '6px 12px', borderRadius: 8, border: 'none',
+            background: T.accDim, color: T.acc, fontSize: 11, fontWeight: 700,
+            fontFamily: F, cursor: 'pointer',
+          }}>重试</button>
         </div>
       )}
       {/* Header row with export menu */}
@@ -467,37 +419,8 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
         )}
       </div>
 
-      {/* Data source toggle — only show when cloud data is available */}
-      {sheetRecords && sheetRecords.length > 0 && (
-        <div style={{
-          display: 'flex', gap: 6, marginBottom: 10,
-          background: T.sf2, borderRadius: 12, padding: 4,
-        }}>
-          {[
-            { id: 'local', label: '📱 本设备', count: receipts.length },
-            { id: 'cloud', label: '☁️ 云端记录', count: sheetRecords.length },
-          ].map(s => (
-            <button
-              key={s.id}
-              onClick={() => setSyncSource(s.id)}
-              style={{
-                flex: 1, padding: '7px 0',
-                borderRadius: 9, border: 'none', cursor: 'pointer',
-                background: syncSource === s.id ? T.card : 'transparent',
-                color: syncSource === s.id ? T.tx : T.tx3,
-                fontSize: 12, fontWeight: syncSource === s.id ? 700 : 500,
-                fontFamily: F,
-                boxShadow: syncSource === s.id ? '0 1px 4px rgba(0,0,0,0.2)' : 'none',
-                transition: 'all 0.15s',
-              }}
-            >
-              {s.label} ({s.count})
-            </button>
-          ))}
-        </div>
-      )}
-
-      {sheetLoading && (
+      {/* Cloud sync status */}
+      {sheetLoading ? (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center',
           padding: '8px', marginBottom: 10, fontSize: 12, color: T.tx3,
@@ -507,9 +430,34 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
             borderTopColor: T.acc, borderRadius: '50%',
             animation: 'spin 0.8s linear infinite',
           }} />
-          正在同步云端记录…
+          正在从 Google Sheets 读取…
         </div>
-      )}
+      ) : sheetRecords != null ? (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 10, padding: '0 2px',
+        }}>
+          <span style={{ fontSize: 10, color: T.tx3 }}>
+            ☁️ 数据来自 Google Sheets
+          </span>
+          <button onClick={fetchRecords} style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontSize: 11, color: T.acc, fontWeight: 600, fontFamily: F,
+          }}>🔄 刷新</button>
+        </div>
+      ) : !config?.sheetId ? (
+        <div style={{
+          background: T.sf2, borderRadius: 14, padding: '16px',
+          textAlign: 'center', marginBottom: 12,
+        }}>
+          <div style={{ fontSize: 13, color: T.tx2, marginBottom: 4 }}>
+            尚未连接 Google Sheets
+          </div>
+          <div style={{ fontSize: 11, color: T.tx3 }}>
+            请在设置中创建记录表
+          </div>
+        </div>
+      ) : null}
 
       {/* Time period selector */}
       <div style={{
