@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { T, F } from '../constants/theme';
 import { findOrCreateFolder, uploadToDriveFolder } from '../services/google';
 import Header from '../components/Header';
+import AiLivePanel from '../components/AiLivePanel';
 import {
   createThumbnail,
   savePending,
@@ -97,7 +98,7 @@ async function compressImage(file, maxWidth = 1280, quality = 0.82) {
   });
 }
 
-export default function ScanView({ onUploaded, onSync, procStatus, config, onStatusChange, onReceiptProcessed, showToast }) {
+export default function ScanView({ onUploaded, onSync, procStatus, config, onStatusChange, onReceiptProcessed, showToast, liveResults }) {
   // items: { id, name, status, retries, error, previewUrl, fromIndexedDB, fileBlob }
   const [items, setItems] = useState([]);
   const [storageAlert, setStorageAlert] = useState(null); // null | { level:'warn'|'crit', totalBytes, count, hasStale }
@@ -505,6 +506,9 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
           </span>
         )}
       </button>
+
+      {/* AI Live Results Panel — expandable */}
+      <AiLivePanel procStatus={procStatus} liveResults={liveResults || []} />
 
       {/* Gallery pill */}
       <button

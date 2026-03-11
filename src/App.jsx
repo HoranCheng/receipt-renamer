@@ -55,6 +55,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [reviewCount, setReviewCount] = useState(0); // T-014: badge for review tab
   const [configConflict, setConfigConflict] = useState(null); // { cloud, local, fields[] }
+  const [liveResults, setLiveResults] = useState([]); // Live AI recognition results for current batch
   const { showToast, ToastContainer } = useToast();
 
   useEffect(() => {
@@ -211,9 +212,9 @@ export default function App() {
         return;
       }
 
-      // Check for conflicts
+      // Check for conflicts (use != null to handle booleans correctly)
       const conflicts = syncFields.filter(k =>
-        cloud[k] && localConfig[k] && cloud[k] !== localConfig[k]
+        cloud[k] != null && localConfig[k] != null && cloud[k] !== localConfig[k]
       );
 
       if (conflicts.length > 0) {
@@ -224,7 +225,7 @@ export default function App() {
         let updated = { ...localConfig };
         let changed = false;
         syncFields.forEach(k => {
-          if (cloud[k] && !localConfig[k]) {
+          if (cloud[k] != null && localConfig[k] == null) {
             updated[k] = cloud[k];
             changed = true;
           }
@@ -300,6 +301,7 @@ export default function App() {
   };
 
   const triggerProcessing = (cfg) => {
+    setLiveResults([]); // Clear previous batch results
     processInboxBackground(cfg || config, handleProcStatus, addReceipt);
   };
 
@@ -360,9 +362,8 @@ export default function App() {
     await store('rr-config', c);
     // Sync to cloud so other devices pick it up
     if (c.connected) {
-      const syncFields = ['inboxFolder', 'validatedFolder', 'reviewFolder', 'sheetId', 'sheetName'];
       const toSave = {};
-      syncFields.forEach(k => { if (c[k]) toSave[k] = c[k]; });
+      SYNC_FIELDS.forEach(k => { if (c[k] != null) toSave[k] = c[k]; });
       toSave.updatedAt = new Date().toISOString();
       saveCloudConfig(toSave).catch(() => {});
     }
@@ -372,6 +373,8 @@ export default function App() {
     const updated = [r, ...receipts];
     setReceipts(updated);
     await store('rr-receipts', updated);
+    // Add to live results panel
+    setLiveResults(prev => [...prev, r]);
     // Toast: AI recognition complete
     const merchant = r.merchant || '未知商家';
     const amount = r.amount ? ` $${parseFloat(r.amount).toFixed(2)}` : '';
@@ -660,6 +663,7 @@ export default function App() {
             onStatusChange={handleProcStatus}
             onReceiptProcessed={addReceipt}
             showToast={showToast}
+            liveResults={liveResults}
           />
         )}
         {view === 'review' && <ReviewView config={config} />}
