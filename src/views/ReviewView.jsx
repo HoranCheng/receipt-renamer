@@ -22,7 +22,7 @@ import { store, load as storageLoad } from '../services/storage';
 
 // ─── Image Lightbox with pinch-to-zoom ────────────────────────────────────────
 
-function Lightbox({ src, onClose }) {
+function Lightbox({ src, onClose, onDelete }) {
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const lastDist = useRef(null);
@@ -103,16 +103,34 @@ function Lightbox({ src, onClose }) {
         }}
         draggable={false}
       />
-      {/* Close button — larger tap target for mobile */}
-      <button onClick={onClose} style={{
-        position: 'absolute', top: 12, right: 12,
-        width: 48, height: 48, borderRadius: '50%',
-        background: 'rgba(255,255,255,0.2)', border: 'none',
-        color: '#fff', fontSize: 22, cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+      {/* Top bar — safe area aware */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0,
+        paddingTop: 'max(16px, env(safe-area-inset-top, 16px))',
+        paddingLeft: 16, paddingRight: 16, paddingBottom: 10,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        background: 'linear-gradient(to bottom, rgba(0,0,0,0.6), transparent)',
         zIndex: 601,
-      }}>✕</button>
+      }}>
+        {/* Delete button (left) */}
+        {onDelete ? (
+          <button onClick={onDelete} style={{
+            width: 44, height: 44, borderRadius: '50%',
+            background: 'rgba(239,68,68,0.25)', border: 'none',
+            color: '#f87171', fontSize: 18, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+          }}>🗑</button>
+        ) : <div style={{ width: 44 }} />}
+        {/* Close button (right) */}
+        <button onClick={onClose} style={{
+          width: 44, height: 44, borderRadius: '50%',
+          background: 'rgba(255,255,255,0.2)', border: 'none',
+          color: '#fff', fontSize: 22, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        }}>✕</button>
+      </div>
       {/* Swipe-down hint */}
       <div style={{
         position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)',
@@ -504,7 +522,16 @@ export default function ReviewView({ config, onReceiptProcessed, showToast }) {
         </button>
 
         {/* Lightbox */}
-        {lightboxUrl && <Lightbox src={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
+        {lightboxUrl && <Lightbox
+          src={lightboxUrl}
+          onClose={() => setLightboxUrl(null)}
+          onDelete={editing ? () => {
+            if (window.confirm('确定从 Drive 删除这个文件？')) {
+              setLightboxUrl(null);
+              handleDelete(editing.fileId);
+            }
+          } : undefined}
+        />}
       </div>
     );
   }
