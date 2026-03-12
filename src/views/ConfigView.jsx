@@ -1,9 +1,127 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { T, F } from '../constants/theme';
 import Header from '../components/Header';
 import Btn from '../components/Btn';
 import StatusDot from '../components/StatusDot';
 import { createReceiptSheet, renameSubFolder } from '../services/google';
+
+// ─── Nuclear Delete: double-confirm + double 5-second wait ───────────────────
+
+function NukeConfirmModal({ stage, countdown, onConfirm, onCancel, deleting, deleteResult }) {
+  // stage: 1 = first confirm, 2 = second confirm, 3 = deleting/done
+  if (!stage) return null;
+
+  const overlay = {
+    position: 'fixed', inset: 0, zIndex: 900,
+    background: 'rgba(0,0,0,0.7)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: 20, animation: 'fadeIn 0.2s ease',
+  };
+  const card = {
+    background: T.card, borderRadius: 20, padding: '24px 20px',
+    maxWidth: 360, width: '100%',
+    border: stage === 2 ? '2px solid rgba(239,68,68,0.6)' : `1px solid ${T.bdr}`,
+  };
+
+  if (stage === 3) {
+    return (
+      <div style={overlay}>
+        <div style={card}>
+          {deleting ? (
+            <div style={{ textAlign: 'center', padding: '20px 0' }}>
+              <div style={{ width: 32, height: 32, border: `3px solid ${T.bdr}`, borderTopColor: T.red, borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.tx }}>正在删除所有数据…</div>
+              <div style={{ fontSize: 12, color: T.tx3, marginTop: 4 }}>请勿关闭页面</div>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '20px 0' }}>
+              <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.tx, marginBottom: 8 }}>数据已全部删除</div>
+              {deleteResult && (
+                <div style={{ fontSize: 11, color: T.tx3, lineHeight: 1.6 }}>
+                  <div>Drive 文件夹已移入回收站：{deleteResult.rootFoldersTrashed} 个</div>
+                  <div>Sheets 记录已清空：{deleteResult.sheetCleared ? '是' : '否'}</div>
+                  <div>本地缓存已清除</div>
+                  {deleteResult.errors?.length > 0 && (
+                    <div style={{ color: T.red, marginTop: 4 }}>
+                      ⚠ {deleteResult.errors.length} 个操作出错，请检查 Drive 回收站
+                    </div>
+                  )}
+                </div>
+              )}
+              <button onClick={onCancel} style={{
+                marginTop: 16, padding: '10px 24px', borderRadius: 10, border: 'none',
+                background: T.accDim, color: T.acc, fontSize: 13, fontWeight: 700,
+                cursor: 'pointer', fontFamily: F,
+              }}>好的</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={overlay}>
+      <div style={card}>
+        <div style={{ textAlign: 'center', marginBottom: 16 }}>
+          <div style={{ fontSize: 36, marginBottom: 8 }}>{stage === 1 ? '⚠️' : '🚨'}</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: T.red }}>
+            {stage === 1 ? '危险操作' : '最终确认 — 不可逆'}
+          </div>
+        </div>
+        <div style={{ fontSize: 13, color: T.tx, lineHeight: 1.8, marginBottom: 16 }}>
+          {stage === 1 ? (
+            <>
+              你即将删除 Receipt Renamer 的<strong>全部数据</strong>，包括：
+              <div style={{ margin: '8px 0', padding: '10px 12px', background: T.sf2, borderRadius: 10, fontSize: 12 }}>
+                • Google Drive 中的 Receipt Renamer 文件夹及所有文件<br/>
+                • Google Sheets 中的消费记录<br/>
+                • 云端配置文件<br/>
+                • 本地缓存和配置<br/>
+                • 所有 IndexedDB 数据
+              </div>
+              <div style={{ fontSize: 12, color: T.red, fontWeight: 600 }}>
+                Drive 文件将移入回收站（30 天内可恢复），但 Sheets 记录清空后无法恢复。
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.red, marginBottom: 8 }}>
+                这是最后一步。确认后数据将立即被删除。
+              </div>
+              <div style={{ fontSize: 12, color: T.tx3 }}>
+                请再次确认你已经了解：Sheets 消费记录清空后不可恢复，Drive 文件将移入回收站。
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onCancel} style={{
+            flex: 1, padding: '12px 0', borderRadius: 10,
+            border: `1px solid ${T.bdr}`, background: 'transparent',
+            color: T.tx2, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: F,
+          }}>取消</button>
+          <button
+            onClick={onConfirm}
+            disabled={countdown > 0}
+            style={{
+              flex: 1, padding: '12px 0', borderRadius: 10, border: 'none',
+              background: countdown > 0 ? T.sf2 : 'rgba(239,68,68,0.9)',
+              color: countdown > 0 ? T.tx3 : '#fff',
+              fontSize: 13, fontWeight: 700, fontFamily: F,
+              cursor: countdown > 0 ? 'not-allowed' : 'pointer',
+              transition: 'all 0.3s',
+            }}
+          >
+            {countdown > 0 ? `请等待 ${countdown} 秒…` : (stage === 1 ? '继续删除' : '确认删除全部数据')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Stable sub-components (defined OUTSIDE to avoid remount on every render) ─
 
@@ -51,13 +169,54 @@ export default function ConfigView({
   onReconnect,
   onSignOut,
   onReset,
+  onNukeAll,
 }) {
   const [creatingSheet, setCreatingSheet] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  // Remember-me removed: rely on Google's native session persistence.
-  // Token is always saved to sessionStorage; Google session cookie handles cross-session restore.
   const [folderEdit, setFolderEdit] = useState({});
+  // Nuclear delete state
+  const [nukeStage, setNukeStage] = useState(0); // 0=hidden, 1=first, 2=second, 3=executing/done
+  const [nukeCountdown, setNukeCountdown] = useState(0);
+  const [nukeDeleting, setNukeDeleting] = useState(false);
+  const [nukeResult, setNukeResult] = useState(null);
+
+  // Countdown timer for nuke confirm
+  useEffect(() => {
+    if (nukeCountdown <= 0) return;
+    const t = setTimeout(() => setNukeCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [nukeCountdown]);
+
+  const startNuke = useCallback(() => {
+    setNukeStage(1);
+    setNukeCountdown(5);
+    setNukeResult(null);
+  }, []);
+
+  const handleNukeConfirm = useCallback(async () => {
+    if (nukeStage === 1) {
+      // Move to second confirm
+      setNukeStage(2);
+      setNukeCountdown(5);
+    } else if (nukeStage === 2) {
+      // Execute
+      setNukeStage(3);
+      setNukeDeleting(true);
+      try {
+        const result = await onNukeAll();
+        setNukeResult(result);
+      } catch (e) {
+        setNukeResult({ rootFoldersTrashed: 0, sheetCleared: false, errors: [e.message] });
+      }
+      setNukeDeleting(false);
+    }
+  }, [nukeStage, onNukeAll]);
+
+  const handleNukeCancel = useCallback(() => {
+    setNukeStage(0);
+    setNukeCountdown(0);
+  }, []);
 
   const save = async () => {
     await onSave(config);
@@ -462,14 +621,44 @@ export default function ConfigView({
         background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.15)',
         borderRadius: 14, padding: '14px 16px',
       }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: T.red, marginBottom: 8 }}>危险区域</div>
-        <div style={{ fontSize: 12, color: T.tx3, marginBottom: 10 }}>
-          清除所有本地数据（不影响 Google Drive 和 Sheets 里的文件）
+        <div style={{ fontSize: 11, fontWeight: 700, color: T.red, marginBottom: 12 }}>危险区域</div>
+
+        {/* Clear local cache only */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: T.tx3, marginBottom: 8 }}>
+            清除本地缓存（不影响 Google Drive 和 Sheets 里的数据）
+          </div>
+          <Btn small onClick={onReset} style={{ color: T.red, borderColor: 'rgba(239,68,68,0.3)' }}>
+            🧹 清除本地缓存
+          </Btn>
         </div>
-        <Btn small onClick={onReset} style={{ color: T.red, borderColor: 'rgba(239,68,68,0.3)' }}>
-          🗑️ 清除本地缓存
-        </Btn>
+
+        {/* Nuclear: delete ALL data */}
+        {config.connected && (
+          <div style={{ borderTop: '1px solid rgba(239,68,68,0.15)', paddingTop: 14 }}>
+            <div style={{ fontSize: 12, color: T.red, marginBottom: 4, fontWeight: 600 }}>
+              彻底删除全部数据
+            </div>
+            <div style={{ fontSize: 11, color: T.tx3, marginBottom: 8, lineHeight: 1.5 }}>
+              删除 Google Drive 文件夹、Sheets 记录、云端配置、本地缓存。
+              <strong style={{ color: T.red }}>此操作不可完全撤销。</strong>
+            </div>
+            <Btn small onClick={startNuke} style={{ color: '#fff', background: 'rgba(239,68,68,0.8)', borderColor: 'rgba(239,68,68,0.5)' }}>
+              ☠️ 删除我的全部数据
+            </Btn>
+          </div>
+        )}
       </div>
+
+      {/* Nuclear delete confirm modal */}
+      <NukeConfirmModal
+        stage={nukeStage}
+        countdown={nukeCountdown}
+        onConfirm={handleNukeConfirm}
+        onCancel={handleNukeCancel}
+        deleting={nukeDeleting}
+        deleteResult={nukeResult}
+      />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { T, F } from './constants/theme';
 import { DEFAULT_CONFIG } from './constants';
 import {
   initGoogleAPI,
+  nukeAllUserData,
   isGapiLoaded,
   requestAccessToken,
   fetchUserProfile,
@@ -571,6 +572,35 @@ export default function App() {
     } catch {}
   };
 
+  const handleNukeAll = async () => {
+    // 1. Delete cloud data (Drive folders + Sheets rows + config file)
+    const result = await nukeAllUserData(config.sheetId, config.sheetName || 'receipt_index');
+
+    // 2. Clear all local data
+    clearAllData();
+
+    // 3. Clear IndexedDB
+    try {
+      const userId = localStorage.getItem('rr-current-user') || '';
+      const dbs = ['rr-sw-queue'];
+      if (userId) {
+        dbs.push(`rr-image-cache::${userId}`, `rr-pending-uploads::${userId}`);
+      }
+      dbs.push('rr-image-cache', 'rr-pending-uploads');
+      dbs.forEach(name => indexedDB.deleteDatabase(name));
+    } catch {}
+
+    // 4. Sign out
+    signOut();
+    clearSWToken();
+
+    // 5. Reset app state to factory defaults
+    setConfig(DEFAULT_CONFIG);
+    setReceipts([]);
+
+    return result;
+  };
+
   if (!ready)
     return (
       <div
@@ -809,6 +839,7 @@ export default function App() {
             onReconnect={handleReconnect}
             onSignOut={handleSignOut}
             onReset={handleReset}
+            onNukeAll={handleNukeAll}
           />
         )}
 

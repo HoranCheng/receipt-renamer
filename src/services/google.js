@@ -558,6 +558,76 @@ export async function getFileMetadata(fileId) {
   });
 }
 
+// ─── Nuclear delete: remove ALL user data from Drive + Sheets ─────────────────
+
+/**
+ * Permanently trash the entire Receipt Renamer root folder (and all subfolders/files),
+ * plus clear all rows from the receipt Sheets spreadsheet.
+ * Returns a summary of what was deleted.
+ */
+export async function nukeAllUserData(sheetId, sheetName = 'receipt_index') {
+  const summary = { rootFoldersTrashed: 0, sheetCleared: false, errors: [] };
+
+  // 1. Trash ALL Receipt Renamer root folders (including duplicates)
+  try {
+    const data = await driveReq('GET', '/files', {
+      params: {
+        q: `name='${escQ(ROOT_FOLDER_NAME)}' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents`,
+        fields: 'files(id)',
+        pageSize: 50,
+      },
+    });
+    for (const folder of (data.files || [])) {
+      try {
+        await driveReq('PATCH', `/files/${folder.id}`, { body: { trashed: true } });
+        summary.rootFoldersTrashed++;
+      } catch (e) {
+        summary.errors.push(`Trash folder ${folder.id}: ${e.message}`);
+      }
+    }
+    _cachedRootFolderId = null;
+    _folderIdCache = {};
+  } catch (e) {
+    summary.errors.push(`List root folders: ${e.message}`);
+  }
+
+  // 2. Clear Sheets data (keep header row, delete all data rows)
+  if (sheetId) {
+    try {
+      const token = await ensureToken();
+      const range = encodeURIComponent(`${sheetName}!A2:Z`);
+      const res = await fetch(
+        `${SHEETS_API}/spreadsheets/${sheetId}/values/${range}:clear`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        }
+      );
+      if (res.ok) summary.sheetCleared = true;
+      else summary.errors.push(`Clear sheet: HTTP ${res.status}`);
+    } catch (e) {
+      summary.errors.push(`Clear sheet: ${e.message}`);
+    }
+  }
+
+  // 3. Also trash the cloud config file if it exists
+  try {
+    const configData = await driveReq('GET', '/files', {
+      params: {
+        q: `name='${escQ(CONFIG_FILE_NAME)}' and trashed=false`,
+        fields: 'files(id)',
+        pageSize: 5,
+      },
+    });
+    for (const f of (configData.files || [])) {
+      await driveReq('PATCH', `/files/${f.id}`, { body: { trashed: true } }).catch(() => {});
+    }
+  } catch {}
+
+  return summary;
+}
+
 // ─── Auto-create receipt sheet ────────────────────────────────────────────────
 
 /**
