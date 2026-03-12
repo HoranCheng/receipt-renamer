@@ -80,10 +80,12 @@
 
 | ID | Task | Priority | Status |
 |----|------|----------|--------|
-| D-001 | Drive API 注入防护详细说明 | P0 | ✅ 在报告中 |
-| D-002 | 清缓存不退出登录机制说明 | P0 | ✅ 在报告中 |
-| D-003 | ARCHITECTURE.md | P1 | 🔲 |
-| D-004 | SECURITY.md | P1 | 🔲 |
+| D-001 | Drive API 注入防护详细说明 | P0 | ✅ SECURITY.md |
+| D-002 | 清缓存不退出登录机制说明 | P0 | ✅ SECURITY.md |
+| D-003 | ARCHITECTURE.md | P1 | ✅ |
+| D-004 | SECURITY.md | P1 | ✅ |
+| D-005 | 多用户隔离测试计划 | P1 | ✅ MULTI_USER_ISOLATION_TEST.md |
+| D-006 | 命名方案比较 + 建议 | P1 | ✅ NAMING_OPTIONS.md |
 
 ---
 
