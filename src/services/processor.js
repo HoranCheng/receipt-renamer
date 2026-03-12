@@ -15,7 +15,7 @@ import {
 import { analyzeReceipt } from './ai';
 import { removeCachedImage } from './imageCache';
 import { store, load } from './storage';
-import { buildReceiptName } from '../utils/naming';
+import { buildReceiptName, resetNameCounters, seedNameCounters } from '../utils/naming';
 
 // Callback to update config from processor (e.g. when auto-creating sheet)
 let _configCallback = null;
@@ -272,6 +272,19 @@ async function _runQueue() {
     _running = false;
     _notifyStatus();
     return;
+  }
+
+  // Seed name counters from existing files to avoid collisions
+  try {
+    const [validFiles, reviewFiles] = await Promise.all([
+      listFilesInFolder(validId).then(r => r.files),
+      listFilesInFolder(reviewId).then(r => r.files),
+    ]);
+    const existingNames = [...validFiles, ...reviewFiles].map(f => f.name);
+    seedNameCounters(existingNames);
+  } catch (e) {
+    console.warn('Failed to seed name counters, using fresh sequence:', e);
+    resetNameCounters();
   }
 
   while (_queue.length > 0) {

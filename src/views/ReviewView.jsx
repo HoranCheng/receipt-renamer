@@ -17,7 +17,7 @@ import Field from '../components/Field';
 import CatChips from '../components/CatChips';
 import StatusDot from '../components/StatusDot';
 import { RobotWorking, RobotDone, NotReceiptBadge } from '../components/RobotScene';
-import { buildReceiptName } from '../utils/naming';
+import { buildReceiptName, seedNameCounters } from '../utils/naming';
 import { store, load as storageLoad } from '../services/storage';
 
 // ─── Image Lightbox with pinch-to-zoom ────────────────────────────────────────
@@ -182,10 +182,14 @@ export default function ReviewView({ config, onReceiptProcessed, showToast, show
       setValidFolderId(validId);
       setInboxFolderId(inboxId);
       // Load from both review folder and inbox (unprocessed files)
-      const [reviewResult, inboxResult] = await Promise.all([
+      const [reviewResult, inboxResult, validResult] = await Promise.all([
         listFilesInFolder(reviewId),
         listFilesInFolder(inboxId),
+        listFilesInFolder(validId),
       ]);
+      // Seed name counters from existing validated + review files
+      const existingNames = [...validResult.files, ...reviewResult.files].map(f => f.name);
+      seedNameCounters(existingNames);
       const enrichReview = reviewResult.files.map((f) => {
         let aiData = {};
         try { aiData = JSON.parse(f.description || '{}'); } catch {}

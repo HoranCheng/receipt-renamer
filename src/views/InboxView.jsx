@@ -8,7 +8,7 @@ import {
   appendToSheet,
 } from '../services/google';
 import { analyzeReceipt } from '../services/ai';
-import { buildReceiptName } from '../utils/naming';
+import { buildReceiptName, seedNameCounters } from '../utils/naming';
 import Header from '../components/Header';
 import Btn from '../components/Btn';
 
@@ -38,6 +38,15 @@ export default function InboxView({ config, onProcessed, showAlert }) {
       reviewIdRef.current = await findOrCreateFolder(
         config.reviewFolder || '小票待确认'
       );
+      // Seed name counters to avoid collisions with existing files
+      try {
+        const [validFiles, reviewFiles] = await Promise.all([
+          listFilesInFolder(validIdRef.current).then(r => r.files),
+          listFilesInFolder(reviewIdRef.current).then(r => r.files),
+        ]);
+        seedNameCounters([...validFiles, ...reviewFiles].map(f => f.name));
+      } catch (e) { console.warn('Counter seed failed:', e); }
+
       const result = await listFilesInFolder(inboxId);
       setFiles(result.files);
       setNextPageToken(result.nextPageToken);
