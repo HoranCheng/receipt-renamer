@@ -154,7 +154,7 @@ function Lightbox({ src, onClose, onDelete }) {
 
 // ─── Main ReviewView ──────────────────────────────────────────────────────────
 
-export default function ReviewView({ config, onReceiptProcessed, showToast }) {
+export default function ReviewView({ config, onReceiptProcessed, showToast, showAlert, showConfirm }) {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -487,7 +487,9 @@ export default function ReviewView({ config, onReceiptProcessed, showToast }) {
         {/* Delete option — less prominent */}
         <button
           onClick={() => {
-            if (window.confirm('确定从 Drive 删除这个文件？此操作不可撤销。')) {
+            if (showConfirm) {
+              showConfirm('删除文件', '确定从 Drive 删除这个文件？此操作不可撤销。', () => handleDelete(editing.fileId), true);
+            } else if (window.confirm('确定从 Drive 删除这个文件？此操作不可撤销。')) {
               handleDelete(editing.fileId);
             }
           }}
@@ -526,7 +528,9 @@ export default function ReviewView({ config, onReceiptProcessed, showToast }) {
           src={lightboxUrl}
           onClose={() => setLightboxUrl(null)}
           onDelete={editing ? () => {
-            if (window.confirm('确定从 Drive 删除这个文件？')) {
+            if (showConfirm) {
+              showConfirm('删除文件', '确定从 Drive 删除这个文件？', () => { setLightboxUrl(null); handleDelete(editing.fileId); }, true);
+            } else if (window.confirm('确定从 Drive 删除这个文件？')) {
               setLightboxUrl(null);
               handleDelete(editing.fileId);
             }
@@ -602,7 +606,9 @@ export default function ReviewView({ config, onReceiptProcessed, showToast }) {
                   </Btn>
                   <button
                     onClick={() => {
-                      if (window.confirm('确定从 Drive 删除？')) handleDelete(f.id);
+                      if (showConfirm) {
+                        showConfirm('删除文件', '确定从 Drive 删除？', () => handleDelete(f.id), true);
+                      } else if (window.confirm('确定从 Drive 删除？')) handleDelete(f.id);
                     }}
                     disabled={isDeletingThis}
                     style={{

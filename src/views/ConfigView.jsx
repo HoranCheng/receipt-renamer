@@ -170,6 +170,7 @@ export default function ConfigView({
   onSignOut,
   onReset,
   onNukeAll,
+  showAlert,
 }) {
   const [creatingSheet, setCreatingSheet] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -398,7 +399,7 @@ export default function ConfigView({
                   setTimeout(() => setFolderEdit(p => ({ ...p, [key]: { ...p[key], done: false } })), 2000);
                 } catch (e) {
                   setFolderEdit(p => ({ ...p, [key]: { ...p[key], renaming: false } }));
-                  alert('重命名失败：' + e.message);
+                  (showAlert || alert)('重命名失败', e.message, true);
                 }
               };
 
@@ -484,7 +485,7 @@ export default function ConfigView({
               try {
                 const id = await createReceiptSheet('receipt_index');
                 setConfig(c => ({ ...c, sheetId: id, sheetName: 'receipt_index' }));
-              } catch (e) { alert('创建失败：' + e.message); }
+              } catch (e) { (showAlert || alert)('创建失败', e.message, true); }
               setCreatingSheet(false);
             }}
             disabled={creatingSheet}

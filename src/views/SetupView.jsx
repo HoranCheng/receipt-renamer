@@ -7,7 +7,7 @@ import StatusDot from '../components/StatusDot';
 
 const BUILT_IN_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
-export default function SetupView({ config, setConfig, onSave }) {
+export default function SetupView({ config, setConfig, onSave, showAlert }) {
   const hasBuiltInClientId = Boolean(BUILT_IN_CLIENT_ID);
   const step = config.connected ? 1 : 0;
   const [creatingSheet, setCreatingSheet] = useState(false);
@@ -67,7 +67,7 @@ export default function SetupView({ config, setConfig, onSave }) {
                   await requestAccessToken();
                   setConfig((c) => ({ ...c, clientId, connected: true }));
                 } catch (e) {
-                  alert('\u8FDE\u63A5\u5931\u8D25\uFF1A' + (e.message || JSON.stringify(e)));
+                  (showAlert || alert)('连接失败', e.message || JSON.stringify(e), true);
                 }
               }}
             >
@@ -156,7 +156,7 @@ export default function SetupView({ config, setConfig, onSave }) {
                     const id = await createReceiptSheet('receipt_index');
                     setConfig(c => ({ ...c, sheetId: id, sheetName: 'receipt_index' }));
                   } catch (e) {
-                    alert('创建失败：' + e.message);
+                    (showAlert || alert)('创建失败', e.message, true);
                   }
                   setCreatingSheet(false);
                 }}

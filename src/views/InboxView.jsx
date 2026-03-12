@@ -12,7 +12,7 @@ import { buildReceiptName } from '../utils/naming';
 import Header from '../components/Header';
 import Btn from '../components/Btn';
 
-export default function InboxView({ config, onProcessed }) {
+export default function InboxView({ config, onProcessed, showAlert }) {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(null);
@@ -42,7 +42,7 @@ export default function InboxView({ config, onProcessed }) {
       setFiles(result.files);
       setNextPageToken(result.nextPageToken);
     } catch (e) {
-      alert('\u52A0\u8F7D\u5931\u8D25\uFF1A' + e.message);
+      (showAlert || alert)('加载失败', e.message, true);
     }
     setLoading(false);
   };

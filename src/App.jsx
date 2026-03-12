@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { T, F } from './constants/theme';
 import { DEFAULT_CONFIG } from './constants';
+import { AlertModal, ConfirmModal } from './components/Modal';
 import {
   initGoogleAPI,
   nukeAllUserData,
@@ -57,6 +58,12 @@ export default function App() {
   const [reviewCount, setReviewCount] = useState(0); // T-014: badge for review tab
   const [configConflict, setConfigConflict] = useState(null); // { cloud, local, fields[] }
   const [liveResults, setLiveResults] = useState([]); // Live AI recognition results for current batch
+
+  // Modal state (replaces native alert/confirm)
+  const [alertModal, setAlertModal] = useState({ open: false, title: '', message: '', danger: false });
+  const [confirmModal, setConfirmModal] = useState({ open: false, title: '', message: '', danger: false, onConfirm: null });
+  const showAlert = useCallback((title, message, danger = false) => setAlertModal({ open: true, title, message, danger }), []);
+  const showConfirm = useCallback((title, message, onConfirm, danger = false) => setConfirmModal({ open: true, title, message, danger, onConfirm }), []);
   const { showToast, ToastContainer } = useToast();
 
   // Let processor notify us when it auto-creates a sheet
@@ -527,9 +534,7 @@ export default function App() {
       setConfig(updated);
       await store('rr-config', updated);
     } catch (e) {
-      alert(
-        '\u8FDE\u63A5\u5931\u8D25\uFF1A' + (e.message || JSON.stringify(e))
-      );
+      showAlert('连接失败', e.message || JSON.stringify(e), true);
     }
   };
 
@@ -543,8 +548,7 @@ export default function App() {
     await store('rr-config', updated);
   };
 
-  const handleReset = async () => {
-    if (!confirm('确定要清除所有本地缓存吗？（不影响 Google 账号连接和 Drive 数据）')) return;
+  const executeReset = async () => {
     // Preserve auth state across reset
     const preservedAuth = {
       connected: config.connected,
@@ -570,6 +574,14 @@ export default function App() {
       dbs.push('rr-image-cache', 'rr-pending-uploads');
       dbs.forEach(name => indexedDB.deleteDatabase(name));
     } catch {}
+  };
+
+  const handleReset = () => {
+    showConfirm(
+      '清除本地缓存',
+      '确定要清除所有本地缓存吗？不影响 Google 账号连接和 Drive 数据。',
+      executeReset
+    );
   };
 
   const handleNukeAll = async () => {
@@ -638,6 +650,7 @@ export default function App() {
           config={config}
           setConfig={setConfig}
           onSave={handleSetupComplete}
+          showAlert={showAlert}
         />
       </div>
     );
@@ -813,8 +826,8 @@ export default function App() {
             liveResults={liveResults}
           />
         )}
-        {view === 'review' && <ReviewView config={config} showToast={showToast} onReceiptProcessed={addReceipt} />}
-        {view === 'inbox' && <InboxView config={config} onProcessed={addReceipt} />}
+        {view === 'review' && <ReviewView config={config} showToast={showToast} onReceiptProcessed={addReceipt} showAlert={showAlert} showConfirm={showConfirm} />}
+        {view === 'inbox' && <InboxView config={config} onProcessed={addReceipt} showAlert={showAlert} />}
         {view === 'log' && !detailReceipt && (
           <LogView
             receipts={receipts}
@@ -840,8 +853,26 @@ export default function App() {
             onSignOut={handleSignOut}
             onReset={handleReset}
             onNukeAll={handleNukeAll}
+            showAlert={showAlert}
           />
         )}
+
+        {/* Global modals */}
+        <AlertModal
+          open={alertModal.open}
+          onClose={() => setAlertModal(m => ({ ...m, open: false }))}
+          title={alertModal.title}
+          message={alertModal.message}
+          danger={alertModal.danger}
+        />
+        <ConfirmModal
+          open={confirmModal.open}
+          onClose={() => setConfirmModal(m => ({ ...m, open: false }))}
+          onConfirm={confirmModal.onConfirm}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          danger={confirmModal.danger}
+        />
 
         <Nav view={view} set={(v) => {
           if (v === 'review') setReviewCount(0); // Clear badge when entering review
