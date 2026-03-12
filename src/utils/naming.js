@@ -11,7 +11,14 @@ function safeName(str) {
 }
 
 function titleCase(str) {
-  return str.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+  return (
+    str
+      .toLowerCase()
+      // Capitalise the first non-whitespace char of every space-delimited word
+      .replace(/(^|\s)(\S)/g, (_, space, char) => space + char.toUpperCase())
+      // Capitalise the first char after a dash (handles "Hi-Fi", "7-Eleven", etc.)
+      .replace(/-(\S)/g, (_, char) => '-' + char.toUpperCase())
+  );
 }
 
 /**

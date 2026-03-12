@@ -126,7 +126,11 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
     // Not a receipt check — but be forgiving
     // If AI says not_receipt but still extracted meaningful data, send to review instead of rejecting
     if (data.is_receipt === false) {
-      const hasData = data.merchant || data.amount || data.date;
+      // NOTE: use explicit null checks — `data.amount` is falsy for 0 (a valid $0 receipt)
+      const hasData =
+        Boolean(data.merchant) ||
+        (data.amount != null && data.amount !== '') ||
+        Boolean(data.date);
       if (hasData) {
         // AI said not receipt but found data → likely a false negative
         // Override: treat as low-confidence receipt, send to review
@@ -221,7 +225,9 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
       }
     } else {
       // Low confidence → review
-      const reviewReason = confidence < 40 ? '置信度极低' : `置信度偏低 (${confidence}%)`;
+      // Preserve any override reason set upstream (e.g. false-negative AI detection message)
+      const defaultReviewReason = confidence < 40 ? '置信度极低' : `置信度偏低 (${confidence}%)`;
+      const reviewReason = data.reviewReason || defaultReviewReason;
       receiptRecord.reviewReason = reviewReason;
       await renameAndMoveFile(file.id, newName, reviewId, inboxId);
       await updateFileMetadata(file.id, {
