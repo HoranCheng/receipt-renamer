@@ -123,30 +123,41 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
       : file.mimeType.includes('png') ? 'image/png' : 'image/jpeg';
     const data = await analyzeReceipt(base64, mt, file.mimeType.includes('pdf') ? 'pdf' : 'image');
 
-    // Not a receipt → move to review with alert
+    // Not a receipt check — but be forgiving
+    // If AI says not_receipt but still extracted meaningful data, send to review instead of rejecting
     if (data.is_receipt === false) {
-      await renameAndMoveFile(file.id, file.name, reviewId, inboxId);
-      await updateFileMetadata(file.id, {
-        description: JSON.stringify({
-          reviewStatus: 'not_receipt',
-          reviewReason: '可能不是小票',
-          originalName: file.name,
-          processedAt: new Date().toISOString(),
-        }),
-      });
-      try {
-        const existing = await load('rr-non-receipt-alerts', []);
-        if (!existing.find(a => a.fileId === file.id)) {
-          existing.push({
-            fileId: file.id,
-            fileName: file.name,
-            driveLink: `https://drive.google.com/file/d/${file.id}/view`,
-            detectedAt: Date.now(),
-          });
-          await store('rr-non-receipt-alerts', existing);
-        }
-      } catch {}
-      return { success: false, reason: 'not_receipt' };
+      const hasData = data.merchant || data.amount || data.date;
+      if (hasData) {
+        // AI said not receipt but found data → likely a false negative
+        // Override: treat as low-confidence receipt, send to review
+        data.is_receipt = true;
+        data.confidence = Math.min(data.confidence || 20, 35); // Cap at 35 so it goes to review
+        data.reviewReason = 'AI 判断可能不是小票，但检测到交易信息，请人工确认';
+      } else {
+        // AI said not receipt AND found no data → likely genuinely not a receipt
+        await renameAndMoveFile(file.id, file.name, reviewId, inboxId);
+        await updateFileMetadata(file.id, {
+          description: JSON.stringify({
+            reviewStatus: 'not_receipt',
+            reviewReason: '可能不是小票（无可识别的交易信息）',
+            originalName: file.name,
+            processedAt: new Date().toISOString(),
+          }),
+        });
+        try {
+          const existing = await load('rr-non-receipt-alerts', []);
+          if (!existing.find(a => a.fileId === file.id)) {
+            existing.push({
+              fileId: file.id,
+              fileName: file.name,
+              driveLink: `https://drive.google.com/file/d/${file.id}/view`,
+              detectedAt: Date.now(),
+            });
+            await store('rr-non-receipt-alerts', existing);
+          }
+        } catch {}
+        return { success: false, reason: 'not_receipt' };
+      }
     }
 
     const confidence = data.confidence || 0;
