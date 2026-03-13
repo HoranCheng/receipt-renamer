@@ -782,6 +782,7 @@ export async function saveCloudConfig(configData) {
     }
   } catch (e) {
     console.warn('Failed to save cloud config:', e);
+    throw e; // Surface to caller so UI can notify user
   }
 }
 

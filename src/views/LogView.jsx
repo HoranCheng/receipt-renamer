@@ -283,7 +283,7 @@ function SwipeRow({ r, onDelete, onDetail }) {
   );
 }
 
-export default function LogView({ receipts, onDelete, onDetail, config, refreshKey }) {
+export default function LogView({ receipts, onDelete, onDetail, config, refreshKey, showAlert }) {
   const [timePeriod, setTimePeriod] = useState('month'); // week | month | all
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -315,6 +315,7 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
 
   // Cloud data is the truth; only use local as instant placeholder while loading
   const activeReceipts = sheetRecords != null ? sheetRecords : receipts;
+  const isCloudSource = sheetRecords != null && sheetRecords.length > 0;
 
   // Apply time filter first, then category + search
   const timeFiltered = filterByTime(activeReceipts, timePeriod);
@@ -576,8 +577,12 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
             <SwipeRow
               key={r.id}
               r={r}
-              onDelete={onDelete}
-              onDetail={onDetail}
+              onDelete={isCloudSource ? () => {
+                (showAlert || alert)('暂不支持', '记录来自 Google Sheets，请在 Sheets 中直接编辑或删除。');
+              } : onDelete}
+              onDetail={isCloudSource ? (rec) => {
+                (showAlert || alert)('查看模式', '记录来自 Google Sheets，目前只读。如需修改请在 Sheets 中编辑。');
+              } : onDetail}
             />
           ))
         )}

@@ -259,7 +259,12 @@ export default function App() {
         const toSave = {};
         syncFields.forEach(k => { if (localConfig[k] != null) toSave[k] = localConfig[k]; });
         toSave.updatedAt = new Date().toISOString();
-        await saveCloudConfig(toSave);
+        try {
+          await saveCloudConfig(toSave);
+        } catch (e) {
+          console.warn('Initial cloud config upload failed:', e);
+          showToast('⚠️ 配置上传失败，跨设备同步可能不可用', 'warn', 4000);
+        }
         return;
       }
 
@@ -358,7 +363,12 @@ export default function App() {
     const toSave = {};
     syncFields.forEach(k => { if (merged[k] != null) toSave[k] = merged[k]; });
     toSave.updatedAt = new Date().toISOString();
-    await saveCloudConfig(toSave);
+    try {
+      await saveCloudConfig(toSave);
+    } catch (e) {
+      console.warn('Cloud config sync after conflict resolve failed:', e);
+      showToast('⚠️ 配置同步失败，请稍后在设置中重试', 'warn', 4000);
+    }
     setConfigConflict(null);
   };
 
@@ -467,7 +477,10 @@ export default function App() {
       const toSave = {};
       SYNC_FIELDS.forEach(k => { if (c[k] != null) toSave[k] = c[k]; });
       toSave.updatedAt = new Date().toISOString();
-      saveCloudConfig(toSave).catch(() => {});
+      saveCloudConfig(toSave).catch((e) => {
+        console.warn('Cloud config sync failed:', e);
+        showToast('⚠️ 配置同步失败，其他设备可能不会更新', 'warn', 4000);
+      });
     }
   };
 
@@ -835,6 +848,7 @@ export default function App() {
             onDetail={(r) => setDetailReceipt(r)}
             config={config}
             refreshKey={receipts.length}
+            showAlert={showAlert}
           />
         )}
         {view === 'log' && detailReceipt && (

@@ -362,6 +362,22 @@ export async function processInboxBackground(config, onStatusChange, onReceiptPr
   }
 }
 
+/**
+ * Process a single file through the full pipeline (AI → name → move → Sheets).
+ * Used by InboxView for individual/batch processing without duplicating logic.
+ * Returns { success, receipt?, reason?, error? }
+ */
+export async function processSingleFile(file, config) {
+  const inboxId = await findOrCreateFolder(config.inboxFolder || '小票待处理');
+  const validId = await findOrCreateFolder(config.validatedFolder || '小票已存档');
+  const reviewId = await findOrCreateFolder(config.reviewFolder || '小票待确认');
+
+  // Ensure config callback is set for auto-sheet creation
+  _configRef = config;
+
+  return _processOneFile(file, config, inboxId, validId, reviewId);
+}
+
 /** Reset processing stats (e.g. after user dismisses) */
 export function resetProcessingStats() {
   _stats = { processing: false, total: 0, done: 0, failed: 0, review: 0 };

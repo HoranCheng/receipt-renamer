@@ -3,12 +3,9 @@ import { T } from '../constants/theme';
 import {
   findOrCreateFolder,
   listFilesInFolder,
-  getFileAsBase64,
-  renameAndMoveFile,
-  appendToSheet,
 } from '../services/google';
-import { analyzeReceipt } from '../services/ai';
-import { buildReceiptName, seedNameCounters } from '../utils/naming';
+import { processSingleFile } from '../services/processor';
+import { seedNameCounters } from '../utils/naming';
 import Header from '../components/Header';
 import Btn from '../components/Btn';
 
@@ -79,73 +76,31 @@ export default function InboxView({ config, onProcessed, showAlert }) {
   const processFile = async (file) => {
     setProcessing(file.id);
     try {
-      const base64 = await getFileAsBase64(file.id, file.mimeType);
-      const mt = file.mimeType.includes('pdf')
-        ? 'application/pdf'
-        : file.mimeType.includes('png')
-          ? 'image/png'
-          : 'image/jpeg';
-      const isPdf = file.mimeType.includes('pdf');
-      const data = await analyzeReceipt(base64, mt, isPdf ? 'pdf' : 'image');
+      // Delegate to the unified processor pipeline
+      const result = await processSingleFile(file, config);
 
-      const ext = file.name.split('.').pop() || 'jpg';
-      const newName = buildReceiptName(data, ext);
-      const conf = data.confidence || 0;
-      const targetFolder =
-        conf >= 70 ? validIdRef.current : reviewIdRef.current;
-
-      await renameAndMoveFile(
-        file.id,
-        newName,
-        targetFolder,
-        inboxIdRef.current
-      );
-
-      let sheetSyncFailed = false;
-      if (config.sheetId) {
-        try {
-          const link = `https://drive.google.com/file/d/${file.id}/view`;
-          await appendToSheet(
-            config.sheetId,
-            config.sheetName || 'receipt_index',
-            [
-              data.date,
-              data.merchant,
-              data.category,
-              data.amount,
-              data.currency || 'AUD',
-              link,
-            ]
-          );
-        } catch (e) {
-          console.warn('Sheets sync failed:', e);
-          sheetSyncFailed = true;
-        }
+      if (result.success && result.receipt) {
+        setResults((prev) => ({
+          ...prev,
+          [file.id]: { status: 'done', receipt: result.receipt, newName: result.receipt.newName },
+        }));
+        onProcessed(result.receipt);
+        return result.receipt;
+      } else {
+        // not_receipt or error from processor
+        const reason = result.reason === 'not_receipt' ? '不是小票' : (result.error || '处理失败');
+        setResults((prev) => ({
+          ...prev,
+          [file.id]: { status: result.reason === 'not_receipt' ? 'not_receipt' : 'error', error: reason },
+        }));
+        return null;
       }
-
-      const receipt = {
-        id: `r_${Date.now()}_${file.id}`,
-        ...data,
-        originalName: file.name,
-        newName,
-        fileId: file.id,
-        validated: conf >= 70,
-        sheetSyncFailed,
-        status: conf >= 70 ? 'validated' : 'review',
-        createdAt: new Date().toISOString(),
-      };
-
-      setResults((prev) => ({
-        ...prev,
-        [file.id]: { status: 'done', receipt, newName },
-      }));
-      onProcessed(receipt);
-      return receipt;
     } catch (e) {
       setResults((prev) => ({
         ...prev,
         [file.id]: { status: 'error', error: e.message },
       }));
+      return null;
     } finally {
       setProcessing(null);
     }

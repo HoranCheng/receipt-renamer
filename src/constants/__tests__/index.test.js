@@ -5,7 +5,6 @@ import {
   CAT_CLR,
   SCOPES,
   DISCOVERY_DOCS,
-  DRIVE_FOLDERS,
   DEFAULT_CONFIG,
 } from '../index';
 
@@ -62,9 +61,9 @@ describe('Google API constants', () => {
     expect(DISCOVERY_DOCS).toHaveLength(2);
   });
 
-  it('DRIVE_FOLDERS has inbox, validated, review', () => {
-    expect(DRIVE_FOLDERS.inbox).toBe('00_inbox');
-    expect(DRIVE_FOLDERS.validated).toBe('10_validated');
-    expect(DRIVE_FOLDERS.review).toBeDefined();
+  it('DEFAULT_CONFIG has Chinese folder names', () => {
+    expect(DEFAULT_CONFIG.inboxFolder).toBe('小票待处理');
+    expect(DEFAULT_CONFIG.validatedFolder).toBe('小票已存档');
+    expect(DEFAULT_CONFIG.reviewFolder).toBe('小票待确认');
   });
 });
