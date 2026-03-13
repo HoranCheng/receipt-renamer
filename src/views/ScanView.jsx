@@ -181,22 +181,24 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
   const cameraRef = useRef(null);
   const galleryRef = useRef(null);
 
-  // On mount: auto-purge stale items, load persisted queue, check storage health
+  // On mount: auto-purge stale items, load persisted queue, check storage health, auto-resume
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         // 1. Auto-purge items older than STALE_DAYS
         await cleanStaleItems(STALE_DAYS);
 
-        // 2. Load what's left
+        // 2. Load ALL pending items (not just wifi-blocked)
         const persisted = await loadPending();
-        if (persisted.length) {
+        if (persisted.length && !cancelled) {
+          const wifiOnly = config?.wifiOnlyUpload && !isWifi();
           const restored = persisted.map(p => ({
             id: p.id,
             name: p.name,
-            status: 'wifi_blocked',
+            status: wifiOnly ? 'wifi_blocked' : 'queued', // Resume as queued if wifi is OK
             retries: 0,
-            error: 'WiFi 未连接时暂停的',
+            error: wifiOnly ? 'WiFi 未连接时暂停的' : '',
             previewUrl: p.thumbnailBlob ? URL.createObjectURL(p.thumbnailBlob) : null,
             fromIndexedDB: true,
             fileBlob: p.fileBlob,
@@ -208,6 +210,16 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
           queueRef.current = [...queueRef.current, ...restored.filter(r =>
             !queueRef.current.find(x => x.id === r.id)
           )];
+
+          // Auto-resume uploading if there are queued items and wifi is available
+          if (!wifiOnly && restored.some(r => r.status === 'queued') && config?.connected) {
+            const inboxFolder = config?.inboxFolder || 'Inbox';
+            // Small delay to let UI settle
+            setTimeout(() => {
+              if (!cancelled) processQueue(inboxFolder);
+            }, 500);
+            showToast?.(`恢复 ${restored.length} 张未完成的上传`, 'info', 3000);
+          }
         }
 
         // 3. Check storage health
@@ -225,6 +237,7 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
         console.warn('Failed to load pending queue:', e);
       }
     })();
+    return () => { cancelled = true; };
   }, []);
 
   const updateItem = useCallback((id, patch) => {
@@ -376,12 +389,10 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
         previewUrl, fromIndexedDB: false, fileBlob: file,
       };
 
-      // Persist wifi-blocked items to IndexedDB
-      if (wifiOnly) {
-        try {
-          await savePending({ id, name: item.name, fileBlob: file, thumbnailBlob: thumbBlob, addedAt: Date.now() });
-        } catch (e) { console.warn('Failed to persist pending item:', e); }
-      }
+      // Always persist to IndexedDB so items survive app restart
+      try {
+        await savePending({ id, name: item.name, fileBlob: file, thumbnailBlob: thumbBlob, addedAt: Date.now() });
+      } catch (e) { console.warn('Failed to persist pending item:', e); }
 
       return item;
     }));

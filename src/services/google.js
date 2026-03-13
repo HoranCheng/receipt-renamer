@@ -507,22 +507,37 @@ export async function uploadToDriveFolder(blob, fileName, folderId, mimeType = '
 
   const body = new Blob([metaPart, mediaPart, blob, closePart]);
 
-  const res = await fetch(
-    `${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id,name`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
-      },
-      body,
+  // Timeout: 60s for files ≤2MB, 120s for larger (covers slow mobile networks)
+  const timeoutMs = blob.size > 2 * 1024 * 1024 ? 120000 : 60000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(
+      `${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id,name`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body,
+        signal: controller.signal,
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Upload failed (${res.status})`);
     }
-  );
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Upload failed (${res.status})`);
+    return res.json();
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error(`上传超时（${timeoutMs / 1000}秒），请检查网络后重试`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json();
 }
 
 export async function renameAndMoveFile(fileId, newName, targetFolderId, currentFolderId) {
