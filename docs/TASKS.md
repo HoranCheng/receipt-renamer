@@ -74,7 +74,7 @@
 |----|------|----------|--------|
 | T-040 | 多用户数据隔离测试 | P0 | ⏳ 需第二个测试账号 |
 | T-041 | App.jsx 拆分（God Component）| P1 | 🔲 |
-| T-042 | InboxView + processor.js 逻辑统一 | P2 | 🔲 |
+| T-042 | InboxView + processor.js 逻辑统一 | P2 | ✅ `a1cdc28` |
 | T-043 | 上传队列持久化 + 自动恢复 | P0 | ✅ IndexedDB + auto-resume |
 | T-044 | 上传超时机制 | P1 | ✅ AbortController 60s/120s |
 | T-045 | AI 识别 prompt 防误杀 | P0 | ✅ Worker + 前端双层修复 |
@@ -85,8 +85,9 @@
 |----|------|----------|--------|
 | D-001 | Drive API 注入防护详细说明 | P0 | ✅ SECURITY.md |
 | D-002 | 清缓存不退出登录机制说明 | P0 | ✅ SECURITY.md |
-| D-003 | ARCHITECTURE.md | P1 | ✅ |
+| D-003 | ARCHITECTURE.md | P1 | ✅ 更新 `a1cdc28` |
 | D-004 | SECURITY.md | P1 | ✅ |
+| D-007 | DEPLOY.md | P1 | ✅ 新建 `a1cdc28` |
 | D-005 | 多用户隔离测试计划 | P1 | ✅ MULTI_USER_ISOLATION_TEST.md |
 | D-006 | 命名方案比较 + 建议 | P1 | ✅ NAMING_OPTIONS.md |
 
