@@ -164,10 +164,10 @@ describe('Receipt recognition — high confidence (≥70) → auto-validated', (
     const onReceipt = vi.fn();
     await runWithFiles([file], DEFAULT_CONFIG, onReceipt);
 
-    // Should be renamed and moved to the validated folder
+    // Should be renamed and moved to the validated folder (new format: date_category_seq)
     expect(renameAndMoveFile).toHaveBeenCalledWith(
       file.id,
-      '2026.03.10 Woolworths 45.50.jpg',
+      expect.stringMatching(/^2026-03-10_grocery_\d+\.jpg$/),
       FOLDER.validated,
       FOLDER.inbox,
     );
@@ -783,11 +783,10 @@ describe('Receipt naming', () => {
 
     await runWithFiles([makeFile({ name: 'receipt.jpg' })]);
 
-    // titleCase: lowercase first, then capitalise start of each word and after dashes
-    // "JB Hi-Fi" → "Jb Hi-Fi" (dash-capitalisation fix in naming.js)
+    // New format: date_category_seq (merchant no longer in filename)
     expect(renameAndMoveFile).toHaveBeenCalledWith(
       expect.any(String),
-      '2026.03.10 Jb Hi-Fi 1299.00.jpg',
+      expect.stringMatching(/^2026-03-10_shopping_\d+\.jpg$/),
       FOLDER.validated,
       FOLDER.inbox,
     );
