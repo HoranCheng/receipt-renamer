@@ -8,6 +8,7 @@ export default function Field({
   type,
   mono,
   placeholder,
+  borderColor,
 }) {
   return (
     <div style={{ marginBottom: 12 }}>
@@ -36,7 +37,7 @@ export default function Field({
           width: '100%',
           padding: '11px 13px',
           background: T.sf,
-          border: `1px solid ${T.bdr}`,
+          border: `1px solid ${borderColor || T.bdr}`,
           borderRadius: 11,
           color: T.tx,
           fontSize: 14,
@@ -44,7 +45,7 @@ export default function Field({
           outline: 'none',
         }}
         onFocus={(e) => (e.target.style.borderColor = T.acc)}
-        onBlur={(e) => (e.target.style.borderColor = T.bdr)}
+        onBlur={(e) => (e.target.style.borderColor = borderColor || T.bdr)}
       />
     </div>
   );

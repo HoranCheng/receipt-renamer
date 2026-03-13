@@ -152,6 +152,76 @@ function Lightbox({ src, onClose, onDelete }) {
   );
 }
 
+// ─── Field-level confidence scoring ───────────────────────────────────────────
+
+function scoreFields(data) {
+  const scores = {};
+  // Date: valid format and not far-future
+  const dateStr = data.date || '';
+  if (!dateStr) {
+    scores.date = { level: 'err', hint: '日期缺失' };
+  } else if (!/^\d{4}[-/.]\d{2}[-/.]\d{2}$/.test(dateStr)) {
+    scores.date = { level: 'warn', hint: '日期格式异常' };
+  } else {
+    const d = new Date(dateStr.replace(/\./g, '-'));
+    const now = new Date();
+    if (isNaN(d)) {
+      scores.date = { level: 'warn', hint: '无法解析日期' };
+    } else if (d > new Date(now.getTime() + 7 * 86400000)) {
+      scores.date = { level: 'warn', hint: '日期在未来' };
+    } else {
+      scores.date = { level: 'ok' };
+    }
+  }
+  // Merchant
+  const m = (data.merchant || '').trim();
+  if (!m) {
+    scores.merchant = { level: 'err', hint: '商家缺失' };
+  } else if (m.length < 2 || /^(unknown|未知|N\/A)$/i.test(m)) {
+    scores.merchant = { level: 'warn', hint: '商家名可能不准确' };
+  } else {
+    scores.merchant = { level: 'ok' };
+  }
+  // Amount
+  const amt = parseFloat(data.amount);
+  if (data.amount === '' || data.amount == null) {
+    scores.amount = { level: 'err', hint: '金额缺失' };
+  } else if (isNaN(amt)) {
+    scores.amount = { level: 'err', hint: '金额格式错误' };
+  } else if (amt === 0) {
+    scores.amount = { level: 'warn', hint: '金额为 $0' };
+  } else if (amt > 10000) {
+    scores.amount = { level: 'warn', hint: '金额异常高' };
+  } else {
+    scores.amount = { level: 'ok' };
+  }
+  // Category
+  if (!data.category || data.category === 'Other') {
+    scores.category = { level: 'warn', hint: '分类可能不准确' };
+  } else {
+    scores.category = { level: 'ok' };
+  }
+  return scores;
+}
+
+function fieldBorder(level) {
+  if (level === 'err') return 'rgba(239,68,68,0.5)';
+  if (level === 'warn') return 'rgba(251,191,36,0.5)';
+  return undefined; // default border
+}
+
+function FieldHint({ score }) {
+  if (!score || score.level === 'ok') return null;
+  return (
+    <div style={{
+      fontSize: 10, marginTop: 2, fontWeight: 600,
+      color: score.level === 'err' ? '#f87171' : '#fbbf24',
+    }}>
+      ⚠ {score.hint}
+    </div>
+  );
+}
+
 // ─── Main ReviewView ──────────────────────────────────────────────────────────
 
 export default function ReviewView({ config, onReceiptProcessed, showToast, showAlert, showConfirm }) {
@@ -168,6 +238,8 @@ export default function ReviewView({ config, onReceiptProcessed, showToast, show
   const [previewLoading, setPreviewLoading] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const [lightboxLoading, setLightboxLoading] = useState(false);
+  const [quickApproving, setQuickApproving] = useState(null); // fileId being quick-approved
+  const [batchApproving, setBatchApproving] = useState(false);
   const fullSizeCache = useRef({}); // fileId → blobUrl
 
   const load = async () => {
@@ -296,6 +368,79 @@ export default function ReviewView({ config, onReceiptProcessed, showToast, show
       showToast?.('操作失败：' + e.message, 'error');
     }
     setApproving(null);
+  };
+
+  // Quick approve from list — no edit, just pass through with existing AI data
+  const handleQuickApprove = async (file) => {
+    setQuickApproving(file.id);
+    try {
+      const d = file.aiData;
+      const ext = file.name.split('.').pop() || 'jpg';
+      const newName = buildReceiptName(d, ext);
+      const sourceFolderId = file.source === 'inbox' ? inboxFolderId : reviewFolderId;
+      await renameAndMoveFile(file.id, newName, validFolderId, sourceFolderId);
+      await updateFileMetadata(file.id, {
+        description: JSON.stringify({ ...d, reviewStatus: 'approved', approvedAt: new Date().toISOString() }),
+      });
+      if (config.sheetId) {
+        try {
+          const link = `https://drive.google.com/file/d/${file.id}/view`;
+          await appendToSheet(config.sheetId, config.sheetName || 'receipt_index', [
+            d.date, d.merchant, d.category, d.amount, d.currency || 'AUD', link,
+          ]);
+        } catch {}
+      }
+      try {
+        onReceiptProcessed?.({
+          date: d.date, merchant: d.merchant, amount: d.amount,
+          category: d.category, currency: d.currency || 'AUD',
+          confidence: d.confidence, originalName: file.name, newName,
+          createdAt: new Date().toISOString(),
+        });
+      } catch {}
+      removeCachedImage(file.id).catch(() => {});
+      setFiles(prev => prev.filter(f => f.id !== file.id));
+      showToast?.(`✅ ${d.merchant || file.name} 已归档`, 'success', 2000);
+    } catch (e) {
+      showToast?.('快速通过失败：' + e.message, 'error');
+    }
+    setQuickApproving(null);
+  };
+
+  // Batch approve all items with reasonable data (confidence ≥ 40 and all key fields present)
+  const handleBatchApprove = async () => {
+    const eligible = files.filter(f => {
+      const d = f.aiData;
+      if (d.reviewStatus === 'not_receipt') return false;
+      const scores = scoreFields(d);
+      return !Object.values(scores).some(s => s.level === 'err');
+    });
+    if (!eligible.length) {
+      showToast?.('没有可以批量通过的项目', 'warn', 3000);
+      return;
+    }
+    if (showConfirm) {
+      showConfirm(
+        '批量通过',
+        `确定通过 ${eligible.length} 张小票？所有字段完整的项目将直接归档。`,
+        async () => {
+          setBatchApproving(true);
+          let ok = 0, fail = 0;
+          for (const f of eligible) {
+            try {
+              await handleQuickApprove(f);
+              ok++;
+            } catch { fail++; }
+            // Small delay between items
+            if (eligible.indexOf(f) < eligible.length - 1) {
+              await new Promise(r => setTimeout(r, 800));
+            }
+          }
+          setBatchApproving(false);
+          showToast?.(`批量通过完成：${ok} 张成功${fail ? `，${fail} 张失败` : ''}`, ok && !fail ? 'success' : 'warn', 4000);
+        }
+      );
+    }
   };
 
   const handleDelete = async (fileId) => {
@@ -466,19 +611,36 @@ export default function ReviewView({ config, onReceiptProcessed, showToast, show
           )}
         </div>
 
-        {/* Editable fields */}
-        <Field label="日期" icon="📅" value={d.date} type="date"
-          onChange={v => setEditing(e => ({ ...e, data: { ...e.data, date: v } }))} />
-        <Field label="商家" icon="🏪" value={d.merchant}
-          onChange={v => setEditing(e => ({ ...e, data: { ...e.data, merchant: v } }))} />
-        <Field label="金额" icon="💰" value={d.amount} type="number" mono
-          onChange={v => setEditing(e => ({ ...e, data: { ...e.data, amount: v } }))} />
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 10, fontWeight: 700, color: T.tx3, letterSpacing: '1px', display: 'block', marginBottom: 6 }}>
-            🏷️ 分类
-          </label>
-          <CatChips value={d.category} onChange={v => setEditing(e => ({ ...e, data: { ...e.data, category: v } }))} />
-        </div>
+        {/* Editable fields with confidence highlights */}
+        {(() => {
+          const fs = scoreFields(d);
+          return (<>
+            <div>
+              <Field label="日期" icon="📅" value={d.date} type="date"
+                borderColor={fieldBorder(fs.date?.level)}
+                onChange={v => setEditing(e => ({ ...e, data: { ...e.data, date: v } }))} />
+              <FieldHint score={fs.date} />
+            </div>
+            <div>
+              <Field label="商家" icon="🏪" value={d.merchant}
+                borderColor={fieldBorder(fs.merchant?.level)}
+                onChange={v => setEditing(e => ({ ...e, data: { ...e.data, merchant: v } }))} />
+              <FieldHint score={fs.merchant} />
+            </div>
+            <div>
+              <Field label="金额" icon="💰" value={d.amount} type="number" mono
+                borderColor={fieldBorder(fs.amount?.level)}
+                onChange={v => setEditing(e => ({ ...e, data: { ...e.data, amount: v } }))} />
+              <FieldHint score={fs.amount} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 10, fontWeight: 700, color: T.tx3, letterSpacing: '1px', display: 'block', marginBottom: 6 }}>
+                🏷️ 分类 {fs.category?.level !== 'ok' && <span style={{ color: '#fbbf24' }}>⚠ {fs.category?.hint}</span>}
+              </label>
+              <CatChips value={d.category} onChange={v => setEditing(e => ({ ...e, data: { ...e.data, category: v } }))} />
+            </div>
+          </>);
+        })()}
 
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
@@ -550,7 +712,31 @@ export default function ReviewView({ config, onReceiptProcessed, showToast, show
     <div style={{ padding: '0 16px 100px' }}>
       <Header title="待审核" sub={`${files.length} 个需要处理`} />
 
-      <Btn small onClick={load} style={{ marginBottom: 16, width: '100%' }}>🔄 刷新</Btn>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <Btn small onClick={load} style={{ flex: 1 }}>🔄 刷新</Btn>
+        {files.length > 1 && !batchApproving && (
+          <Btn small primary onClick={handleBatchApprove} style={{ flex: 2 }}>
+            ⚡ 批量通过 ({files.filter(f => {
+              const d = f.aiData;
+              if (d.reviewStatus === 'not_receipt') return false;
+              return !Object.values(scoreFields(d)).some(s => s.level === 'err');
+            }).length})
+          </Btn>
+        )}
+        {batchApproving && (
+          <div style={{
+            flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: 8, fontSize: 12, color: T.acc, fontWeight: 600,
+          }}>
+            <div style={{
+              width: 14, height: 14, border: `2px solid ${T.bdr}`,
+              borderTopColor: T.acc, borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite',
+            }} />
+            批量处理中…
+          </div>
+        )}
+      </div>
 
       {loading ? (
         <RobotWorking title="正在检查待审核小票…" sub="从 Google Drive 加载中" />
@@ -605,6 +791,30 @@ export default function ReviewView({ config, onReceiptProcessed, showToast, show
 
                 {/* Action buttons */}
                 <div style={{ display: 'flex', gap: 8 }}>
+                  {/* Quick approve — only for items with all key fields present */}
+                  {!isNotReceipt && !Object.values(scoreFields(d)).some(s => s.level === 'err') && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleQuickApprove(f); }}
+                      disabled={quickApproving === f.id}
+                      style={{
+                        flexShrink: 0, padding: '8px 14px',
+                        background: 'rgba(52,211,153,0.1)',
+                        border: '1px solid rgba(52,211,153,0.3)',
+                        borderRadius: 10, cursor: quickApproving === f.id ? 'not-allowed' : 'pointer',
+                        color: '#34d399', fontSize: 12, fontWeight: 700, fontFamily: F,
+                        display: 'flex', alignItems: 'center', gap: 5,
+                      }}
+                    >
+                      {quickApproving === f.id ? (
+                        <div style={{
+                          width: 12, height: 12, border: '2px solid rgba(52,211,153,0.3)',
+                          borderTopColor: '#34d399', borderRadius: '50%',
+                          animation: 'spin 0.8s linear infinite',
+                        }} />
+                      ) : '⚡'}
+                      {quickApproving === f.id ? '…' : '通过'}
+                    </button>
+                  )}
                   <Btn small primary full onClick={() => handleEdit(f)} style={{ flex: 1 }}>
                     {isNotReceipt ? '查看详情 →' : '核查并通过 →'}
                   </Btn>
