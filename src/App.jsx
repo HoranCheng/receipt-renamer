@@ -356,6 +356,13 @@ export default function App() {
           }
         }
       }
+      // Preserve cloud-only fields that are absent locally (e.g. sheetId)
+      // This prevents losing the Sheets connection when local hasn't set it yet
+      for (const k of syncFields) {
+        if (!merged[k] && configConflict.cloud[k]) {
+          merged[k] = configConflict.cloud[k];
+        }
+      }
     }
     // Save merged config to both local and cloud
     setConfig(merged);
