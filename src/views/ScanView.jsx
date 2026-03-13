@@ -243,10 +243,15 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
   const updateItem = useCallback((id, patch) => {
     setItems(prev => prev.map(it => it.id === id ? { ...it, ...patch } : it));
     queueRef.current = queueRef.current.map(it => it.id === id ? { ...it, ...patch } : it);
-    // Auto-dismiss done items after 2s
+    // Auto-dismiss done items after 2s + release memory
     if (patch.status === 'done') {
       setTimeout(() => {
-        setItems(prev => prev.filter(it => it.id !== id || it.status !== 'done'));
+        setItems(prev => {
+          const item = prev.find(it => it.id === id);
+          if (item?.previewUrl) URL.revokeObjectURL(item.previewUrl);
+          delete filesRef.current[id];
+          return prev.filter(it => it.id !== id || it.status !== 'done');
+        });
         queueRef.current = queueRef.current.filter(it => it.id !== id);
       }, 2000);
     }
@@ -280,7 +285,8 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
         try {
           const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '-' +
             Math.random().toString(36).slice(2, 5);
-          const ext = (file.type || '').includes('png') ? 'png' : 'jpg';
+          const ext = (file.type || '').includes('pdf') ? 'pdf'
+            : (file.type || '').includes('png') ? 'png' : 'jpg';
           const fileName = `receipt_${ts}.${ext}`;
           const folderId = await findOrCreateFolder(inboxFolder);
           const uploaded = await uploadToDriveFolder(file, fileName, folderId, file.type || 'image/jpeg');
@@ -308,10 +314,9 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
       if (success) {
         updateItem(pending.id, { status: 'done' });
         uploadedAny = true;
-        // Remove from IndexedDB if it was persisted
-        if (pending.fromIndexedDB) {
-          try { await removePending(pending.id); } catch {}
-        }
+        // Every queued item is persisted to IndexedDB on add. Always remove it after
+        // a successful upload, otherwise it will be restored again on next app launch.
+        try { await removePending(pending.id); } catch {}
         // T-015: Immediately enqueue for AI processing after each upload
         if (pending._uploadedFile && onStatusChange) {
           // Try SW-based background processing first (survives tab switch)
@@ -458,7 +463,7 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
 
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
         onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }} />
-      <input ref={galleryRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
+      <input ref={galleryRef} type="file" accept="image/*,application/pdf" multiple style={{ display: 'none' }}
         onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }} />
 
       {/* WiFi-blocked pending queue — prominent banner */}

@@ -601,7 +601,7 @@ export async function nukeAllUserData(sheetId, sheetName = 'receipt_index') {
       }
     }
     _cachedRootFolderId = null;
-    _folderIdCache = {};
+    clearFolderCache();
   } catch (e) {
     summary.errors.push(`List root folders: ${e.message}`);
   }
