@@ -9,8 +9,10 @@ import {
   deleteFile,
   getFileThumbnailUrl,
   getFileAsBlobUrl,
+  getFileAsBase64,
 } from '../services/google';
 import { getCachedImageUrl, removeCachedImage } from '../services/imageCache';
+import { analyzeReceipt } from '../services/ai';
 import Header from '../components/Header';
 import Btn from '../components/Btn';
 import Field from '../components/Field';
@@ -240,6 +242,7 @@ export default function ReviewView({ config, onReceiptProcessed, showToast, show
   const [lightboxLoading, setLightboxLoading] = useState(false);
   const [quickApproving, setQuickApproving] = useState(null); // fileId being quick-approved
   const [batchApproving, setBatchApproving] = useState(false);
+  const [prefillingId, setPrefillingId] = useState(null); // fileId being on-demand analyzed for prefill
   const fullSizeCache = useRef({}); // fileId → blobUrl
 
   const load = async () => {
@@ -306,21 +309,62 @@ export default function ReviewView({ config, onReceiptProcessed, showToast, show
     }
   }, [editing?.fileId]);
 
-  const handleEdit = (file) => {
+  const handleEdit = async (file) => {
+    let aiData = file.aiData || {};
+
+    // If this item has no saved AI metadata (common for raw inbox items or older
+    // failed runs), do an on-demand analysis so manual review starts with a draft
+    // instead of a blank form.
+    const hasPrefill = Boolean(aiData.date) || Boolean(aiData.merchant) || (aiData.amount != null && aiData.amount !== '');
+    if (!hasPrefill) {
+      try {
+        setPrefillingId(file.id);
+        const base64 = await getFileAsBase64(file.id);
+        const mt = file.mimeType?.includes('pdf') ? 'application/pdf'
+          : file.mimeType?.includes('png') ? 'image/png' : 'image/jpeg';
+        const analyzed = await analyzeReceipt(base64, mt, file.mimeType?.includes('pdf') ? 'pdf' : 'image');
+        aiData = {
+          ...analyzed,
+          reviewStatus: analyzed.is_receipt === false ? 'not_receipt' : (file.aiData?.reviewStatus || 'pending'),
+          reviewReason: analyzed.reviewReason
+            || (analyzed.is_receipt === false
+              ? 'AI 判断可能不是标准小票，但已尽量提取可见信息'
+              : file.aiData?.reviewReason
+                || '需要核查'),
+        };
+        // Persist the draft so reopening doesn't lose prefill
+        try {
+          await updateFileMetadata(file.id, {
+            description: JSON.stringify({
+              ...file.aiData,
+              ...aiData,
+              originalName: file.aiData?.originalName || file.name,
+              prefetchedAt: new Date().toISOString(),
+            }),
+          });
+        } catch {}
+      } catch (e) {
+        console.warn('On-demand review prefill failed:', e);
+        showToast?.('自动预填失败，仍可手动填写', 'warn', 3000);
+      } finally {
+        setPrefillingId(null);
+      }
+    }
+
     setEditing({
       fileId: file.id,
       name: file.name,
       source: file.source || 'review', // track which folder file came from
-      isNotReceipt: file.aiData.reviewStatus === 'not_receipt',
+      isNotReceipt: aiData.reviewStatus === 'not_receipt' || aiData.is_receipt === false,
       data: {
-        date: file.aiData.date || '',
-        merchant: file.aiData.merchant || '',
-        amount: file.aiData.amount ?? '',
-        category: file.aiData.category || 'Other',
-        currency: file.aiData.currency || 'AUD',
-        confidence: file.aiData.confidence || 0,
-        reviewReason: file.aiData.reviewReason || '需要核查',
-        ...file.aiData,
+        date: aiData.date || '',
+        merchant: aiData.merchant || '',
+        amount: aiData.amount ?? '',
+        category: aiData.category || 'Other',
+        currency: aiData.currency || 'AUD',
+        confidence: aiData.confidence || 0,
+        reviewReason: aiData.reviewReason || '需要核查',
+        ...aiData,
       },
     });
   };
@@ -815,8 +859,8 @@ export default function ReviewView({ config, onReceiptProcessed, showToast, show
                       {quickApproving === f.id ? '…' : '通过'}
                     </button>
                   )}
-                  <Btn small primary full onClick={() => handleEdit(f)} style={{ flex: 1 }}>
-                    {isNotReceipt ? '查看详情 →' : '核查并通过 →'}
+                  <Btn small primary full onClick={() => handleEdit(f)} disabled={prefillingId === f.id} style={{ flex: 1 }}>
+                    {prefillingId === f.id ? '正在预填…' : (isNotReceipt ? '查看详情 →' : '核查并通过 →')}
                   </Btn>
                   <button
                     onClick={() => {

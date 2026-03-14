@@ -138,10 +138,13 @@ async function _processOneFile(file, config, inboxId, validId, reviewId) {
         data.confidence = Math.min(data.confidence || 20, 35); // Cap at 35 so it goes to review
         data.reviewReason = 'AI 判断可能不是小票，但检测到交易信息，请人工确认';
       } else {
-        // AI said not receipt AND found no data → likely genuinely not a receipt
+        // AI said not receipt AND found no core data → likely genuinely not a receipt.
+        // Still preserve any raw/partial guesses from AI so manual review can prefill
+        // whatever the model did extract instead of showing a blank form.
         await renameAndMoveFile(file.id, file.name, reviewId, inboxId);
         await updateFileMetadata(file.id, {
           description: JSON.stringify({
+            ...data,
             reviewStatus: 'not_receipt',
             reviewReason: '可能不是小票（无可识别的交易信息）',
             originalName: file.name,

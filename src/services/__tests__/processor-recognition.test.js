@@ -520,6 +520,27 @@ describe('True negative: not a receipt, no data → rejected', () => {
     const desc = JSON.parse(updateFileMetadata.mock.calls[0][1].description);
     expect(desc.reviewStatus).toBe('not_receipt');
   });
+
+  it('preserves any partial AI guesses in metadata for manual prefill', async () => {
+    analyzeReceipt.mockResolvedValue({
+      is_receipt: false,
+      date: null,
+      merchant: null,
+      amount: null,
+      category: 'Dining',
+      currency: 'AUD',
+      confidence: 7,
+      note: 'contains text but uncertain',
+    });
+
+    await runWithFiles([makeFile()], DEFAULT_CONFIG);
+
+    const desc = JSON.parse(updateFileMetadata.mock.calls[0][1].description);
+    expect(desc.reviewStatus).toBe('not_receipt');
+    expect(desc.category).toBe('Dining');
+    expect(desc.currency).toBe('AUD');
+    expect(desc.note).toBe('contains text but uncertain');
+  });
 });
 
 describe('Edge case: $0 amount treated as real data', () => {
