@@ -507,8 +507,16 @@ export async function uploadToDriveFolder(blob, fileName, folderId, mimeType = '
 
   const body = new Blob([metaPart, mediaPart, blob, closePart]);
 
-  // Timeout: 60s for files ≤2MB, 120s for larger (covers slow mobile networks)
-  const timeoutMs = blob.size > 2 * 1024 * 1024 ? 120000 : 60000;
+  // Timeout: more forgiving on slow/mobile networks
+  const conn = (typeof navigator !== 'undefined')
+    ? (navigator.connection || navigator.mozConnection || navigator.webkitConnection)
+    : null;
+  const weakNetwork = !!conn && (
+    conn.type === 'cellular' || ['slow-2g', '2g', '3g'].includes(conn.effectiveType)
+  );
+  const timeoutMs = weakNetwork
+    ? (blob.size > 2 * 1024 * 1024 ? 180000 : 90000)
+    : (blob.size > 2 * 1024 * 1024 ? 120000 : 60000);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 

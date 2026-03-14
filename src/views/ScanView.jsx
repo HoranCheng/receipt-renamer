@@ -20,11 +20,37 @@ import { enqueueFile } from '../services/processor';
 import { enqueueToSW, isSWAvailable, sendTokenToSW } from '../services/swBridge';
 
 // Network check (Android; iOS Safari doesn't expose connection.type)
+function getConnection() {
+  return navigator.connection || navigator.mozConnection || navigator.webkitConnection || null;
+}
+
 function isWifi() {
-  const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  const conn = getConnection();
   if (!conn) return true; // unknown → allow
   const t = conn.type;
   return !t || t === 'wifi' || t === 'ethernet' || t === 'unknown' || t === 'other';
+}
+
+function isWeakNetwork() {
+  const conn = getConnection();
+  if (!conn) return false;
+  const type = (conn.type || '').toLowerCase();
+  const effectiveType = (conn.effectiveType || '').toLowerCase();
+  return type === 'cellular' || effectiveType === 'slow-2g' || effectiveType === '2g' || effectiveType === '3g';
+}
+
+function getUploadConcurrency() {
+  return isWeakNetwork() ? 1 : 3;
+}
+
+function getNetworkLabel() {
+  const conn = getConnection();
+  if (!conn) return '网络未知';
+  const type = conn.type || '';
+  const effectiveType = conn.effectiveType || '';
+  if (type === 'cellular') return `移动网络${effectiveType ? ` (${effectiveType})` : ''}`;
+  if (type === 'wifi' || type === 'ethernet') return 'Wi‑Fi';
+  return effectiveType || type || '网络未知';
 }
 
 // Animated circular progress ring
@@ -280,8 +306,11 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
       } catch (err) {
         lastError = err.message;
         if (attempt < MAX_RETRIES - 1) {
-          updateItem(pending.id, { retries: attempt + 1 });
-          await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+          updateItem(pending.id, {
+            retries: attempt + 1,
+            error: `网络不稳定，准备第 ${attempt + 2} 次重试…`,
+          });
+          await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
         }
       }
     }
@@ -289,9 +318,8 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
     return false;
   }, [updateItem]);
 
-  const UPLOAD_CONCURRENCY = 3;
-
   const processQueue = useCallback(async (inboxFolder) => {
+    const uploadConcurrency = getUploadConcurrency();
     if (processingRef.current) return;
     processingRef.current = true;
     let uploadedAny = false;
@@ -305,11 +333,15 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
       return;
     }
 
-    // Process in batches of UPLOAD_CONCURRENCY
+    if (isWeakNetwork()) {
+      showToast?.(`检测到 ${getNetworkLabel()}，已切换到稳妥上传模式（单张串行）`, 'warn', 2600);
+    }
+
+    // Process in network-adaptive batches
     while (true) {
       const batch = queueRef.current
         .filter(it => it.status === 'queued')
-        .slice(0, UPLOAD_CONCURRENCY);
+        .slice(0, uploadConcurrency);
       if (!batch.length) break;
 
       // Re-check wifi before each batch
@@ -393,8 +425,10 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
     const wifiOnly = config?.wifiOnlyUpload && !isWifi();
 
     const newItems = await Promise.all(files.map(async (rawFile) => {
-      // Compress if enabled
-      const file = config?.compressImages ? await compressImage(rawFile) : rawFile;
+      // Compress if enabled — use stronger compression on weak/mobile networks
+      const file = config?.compressImages
+        ? await compressImage(rawFile, isWeakNetwork() ? 1080 : 1280, isWeakNetwork() ? 0.72 : 0.82)
+        : rawFile;
       const id = Math.random().toString(36).slice(2) + Date.now();
       const thumbBlob = await createThumbnail(file);
       const previewUrl = thumbBlob ? URL.createObjectURL(thumbBlob) : URL.createObjectURL(file);
