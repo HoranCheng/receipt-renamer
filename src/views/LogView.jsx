@@ -283,7 +283,7 @@ function SwipeRow({ r, onDelete, onDetail }) {
   );
 }
 
-export default function LogView({ receipts, onDelete, onDetail, config, refreshKey, showAlert }) {
+export default function LogView({ receipts, onDelete, onDetail, config, refreshKey, syncTrigger, showAlert }) {
   const [timePeriod, setTimePeriod] = useState('month'); // week | month | all
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -291,6 +291,7 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
   const [sheetRecords, setSheetRecords] = useState(null); // null = not loaded, [] = empty
   const [sheetLoading, setSheetLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [lastSyncTime, setLastSyncTime] = useState(null);
 
   // Always fetch from Sheets — Drive/Sheets is the single source of truth
   const fetchRecords = () => {
@@ -301,6 +302,7 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
       .then(records => {
         setSheetRecords(records || []);
         setSheetLoading(false);
+        setLastSyncTime(new Date());
       })
       .catch(e => {
         console.warn('Sheets read failed:', e);
@@ -311,7 +313,7 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
 
   useEffect(() => {
     fetchRecords();
-  }, [config?.sheetId, config?.connected, refreshKey]);
+  }, [config?.sheetId, config?.connected, refreshKey, syncTrigger]);
 
   // Cloud data is the truth; only use local as instant placeholder while loading
   const activeReceipts = sheetRecords != null ? sheetRecords : receipts;
@@ -356,6 +358,44 @@ export default function LogView({ receipts, onDelete, onDetail, config, refreshK
           }}>重试</button>
         </div>
       )}
+      {/* Sync status bar */}
+      {config?.sheetId && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '6px 12px', marginBottom: 8,
+          background: T.card, border: `1px solid ${T.bdr}`, borderRadius: 10,
+          fontSize: 11, color: T.tx3,
+        }}>
+          <span>
+            {sheetLoading ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span style={{
+                  display: 'inline-block', width: 10, height: 10,
+                  border: `2px solid ${T.bdr}`, borderTopColor: T.acc,
+                  borderRadius: '50%', animation: 'spin 0.8s linear infinite',
+                }} />
+                同步中…
+              </span>
+            ) : lastSyncTime ? (
+              `☁️ 上次同步 ${lastSyncTime.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
+            ) : loadError ? (
+              <span style={{ color: '#f87171' }}>⚠ 同步失败：{loadError}</span>
+            ) : '☁️ 自动同步已开启'}
+          </span>
+          <button
+            onClick={fetchRecords}
+            disabled={sheetLoading}
+            style={{
+              background: 'none', border: 'none', color: T.acc,
+              fontSize: 11, fontWeight: 700, cursor: sheetLoading ? 'default' : 'pointer',
+              padding: '2px 6px', fontFamily: 'inherit',
+            }}
+          >
+            {sheetLoading ? '' : '🔄 手动同步'}
+          </button>
+        </div>
+      )}
+
       {/* Header row with export menu */}
       <div style={{ position: 'relative' }}>
         <Header title="消费记录" sub={`${timeFiltered.length} 张 · $${totalAll.toFixed(2)} · ${periodSub(timePeriod)}`} />

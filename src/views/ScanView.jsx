@@ -257,91 +257,107 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
     }
   }, []);
 
+  // Upload a single item — returns true if successful
+  const uploadOne = useCallback(async (pending, inboxFolder) => {
+    updateItem(pending.id, { status: 'uploading' });
+    const file = filesRef.current[pending.id] || pending.fileBlob;
+    let lastError = '';
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '-' +
+          Math.random().toString(36).slice(2, 5);
+        const ext = (file.type || '').includes('pdf') ? 'pdf'
+          : (file.type || '').includes('png') ? 'png' : 'jpg';
+        const fileName = `receipt_${ts}.${ext}`;
+        const folderId = await findOrCreateFolder(inboxFolder);
+        const uploaded = await uploadToDriveFolder(file, fileName, folderId, file.type || 'image/jpeg');
+        if (uploaded?.id) {
+          rekeyCache(pending.id, uploaded.id).catch(() => {});
+          pending._uploadedFile = { id: uploaded.id, name: fileName, mimeType: file.type || 'image/jpeg' };
+        }
+        return true;
+      } catch (err) {
+        lastError = err.message;
+        if (attempt < MAX_RETRIES - 1) {
+          updateItem(pending.id, { retries: attempt + 1 });
+          await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+        }
+      }
+    }
+    updateItem(pending.id, { status: 'failed', error: lastError });
+    return false;
+  }, [updateItem]);
+
+  const UPLOAD_CONCURRENCY = 3;
+
   const processQueue = useCallback(async (inboxFolder) => {
     if (processingRef.current) return;
     processingRef.current = true;
     let uploadedAny = false;
 
-    while (true) {
-      const pending = queueRef.current.find(it => it.status === 'queued');
-      if (!pending) break;
+    // WiFi-only check
+    if (config?.wifiOnlyUpload && !isWifi()) {
+      queueRef.current
+        .filter(it => it.status === 'queued')
+        .forEach(it => updateItem(it.id, { status: 'wifi_blocked', error: '' }));
+      processingRef.current = false;
+      return;
+    }
 
-      // WiFi-only check
+    // Process in batches of UPLOAD_CONCURRENCY
+    while (true) {
+      const batch = queueRef.current
+        .filter(it => it.status === 'queued')
+        .slice(0, UPLOAD_CONCURRENCY);
+      if (!batch.length) break;
+
+      // Re-check wifi before each batch
       if (config?.wifiOnlyUpload && !isWifi()) {
-        // Block all queued items
         queueRef.current
           .filter(it => it.status === 'queued')
           .forEach(it => updateItem(it.id, { status: 'wifi_blocked', error: '' }));
         break;
       }
 
-      updateItem(pending.id, { status: 'uploading' });
+      const results = await Promise.allSettled(
+        batch.map(item => uploadOne(item, inboxFolder))
+      );
 
-      const file = filesRef.current[pending.id] || pending.fileBlob;
-      let success = false;
-      let lastError = '';
-
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-          const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '-' +
-            Math.random().toString(36).slice(2, 5);
-          const ext = (file.type || '').includes('pdf') ? 'pdf'
-            : (file.type || '').includes('png') ? 'png' : 'jpg';
-          const fileName = `receipt_${ts}.${ext}`;
-          const folderId = await findOrCreateFolder(inboxFolder);
-          const uploaded = await uploadToDriveFolder(file, fileName, folderId, file.type || 'image/jpeg');
-          // Rekey image cache: temp id → Drive file id (so ReviewView can find it)
-          if (uploaded?.id) {
-            rekeyCache(pending.id, uploaded.id).catch(() => {});
-            // Store uploaded file info for immediate AI processing
-            pending._uploadedFile = {
-              id: uploaded.id,
-              name: fileName,
-              mimeType: file.type || 'image/jpeg',
-            };
-          }
-          success = true;
-          break;
-        } catch (err) {
-          lastError = err.message;
-          if (attempt < MAX_RETRIES - 1) {
-            updateItem(pending.id, { retries: attempt + 1 });
-            await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+      for (let i = 0; i < batch.length; i++) {
+        const item = batch[i];
+        const ok = results[i].status === 'fulfilled' && results[i].value;
+        if (ok) {
+          updateItem(item.id, { status: 'done' });
+          uploadedAny = true;
+          try { await removePending(item.id); } catch {}
+          // Enqueue for AI processing
+          if (item._uploadedFile && onStatusChange) {
+            const swQueued = isSWAvailable() && enqueueToSW({
+              id: item._uploadedFile.id,
+              driveFileId: item._uploadedFile.id,
+              fileName: item._uploadedFile.name,
+              mimeType: item._uploadedFile.mimeType,
+              step: 'ai',
+              proxyUrl: import.meta.env.VITE_AI_PROXY_URL || '',
+              uid: localStorage.getItem('rr-current-user') || 'anonymous',
+            });
+            if (!swQueued) {
+              enqueueFile(item._uploadedFile, config, onStatusChange, onReceiptProcessed);
+            }
           }
         }
+        // Failed items already marked by uploadOne
       }
 
-      if (success) {
-        updateItem(pending.id, { status: 'done' });
-        uploadedAny = true;
-        // Every queued item is persisted to IndexedDB on add. Always remove it after
-        // a successful upload, otherwise it will be restored again on next app launch.
-        try { await removePending(pending.id); } catch {}
-        // T-015: Immediately enqueue for AI processing after each upload
-        if (pending._uploadedFile && onStatusChange) {
-          // Try SW-based background processing first (survives tab switch)
-          const swQueued = isSWAvailable() && enqueueToSW({
-            id: pending._uploadedFile.id,
-            driveFileId: pending._uploadedFile.id,
-            fileName: pending._uploadedFile.name,
-            mimeType: pending._uploadedFile.mimeType,
-            step: 'ai', // Already uploaded, just needs AI
-            proxyUrl: import.meta.env.VITE_AI_PROXY_URL || '',
-            uid: localStorage.getItem('rr-current-user') || 'anonymous',
-          });
-          if (!swQueued) {
-            // Fallback: main thread processing
-            enqueueFile(pending._uploadedFile, config, onStatusChange, onReceiptProcessed);
-          }
-        }
-      } else {
-        updateItem(pending.id, { status: 'failed', error: lastError });
+      // Small pause between batches to avoid hammering Drive API
+      if (queueRef.current.some(it => it.status === 'queued')) {
+        await new Promise(r => setTimeout(r, 300));
       }
     }
 
     processingRef.current = false;
     if (uploadedAny) {
-      // Count results
       const doneItems = queueRef.current.filter(it => it.status === 'done').length;
       const failItems = queueRef.current.filter(it => it.status === 'failed').length;
       if (failItems > 0) {
@@ -350,11 +366,10 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
         showToast?.(`${doneItems} 张照片已上传到 Drive ☁️`, 'success');
       }
       onUploaded?.();
-      // Re-check storage health after uploads complete
       const stats = await getPendingStats();
       if (stats.count === 0) setStorageAlert(null);
     }
-  }, [config, updateItem, onUploaded, showToast]);
+  }, [config, updateItem, uploadOne, onUploaded, showToast]);
 
   const handleFiles = useCallback(async (fileList) => {
     if (!fileList?.length) return;

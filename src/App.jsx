@@ -58,6 +58,7 @@ export default function App() {
   const [reviewCount, setReviewCount] = useState(0); // T-014: badge for review tab
   const [configConflict, setConfigConflict] = useState(null); // { cloud, local, fields[] }
   const [liveResults, setLiveResults] = useState([]); // Live AI recognition results for current batch
+  const [syncTrigger, setSyncTrigger] = useState(0); // Incremented to trigger LogView Sheets refresh
 
   // Modal state (replaces native alert/confirm)
   const [alertModal, setAlertModal] = useState({ open: false, title: '', message: '', danger: false });
@@ -219,7 +220,7 @@ export default function App() {
     });
   }, []);
 
-  // T-017: Resume processing when app becomes visible again
+  // T-017: Resume processing when app becomes visible again + auto-sync records
   useEffect(() => {
     const handleVisibility = async () => {
       if (document.visibilityState === 'visible' && config.setupDone && config.connected) {
@@ -235,11 +236,25 @@ export default function App() {
         if (saved && saved.processing) {
           triggerProcessing();
         }
+
+        // Trigger Sheets auto-sync on resume
+        setSyncTrigger(n => n + 1);
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [config]);
+
+  // Auto-sync records from Sheets every 5 minutes while app is visible
+  useEffect(() => {
+    if (!config.setupDone || !config.connected || !config.sheetId) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        setSyncTrigger(n => n + 1);
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+    return () => clearInterval(interval);
+  }, [config.setupDone, config.connected, config.sheetId]);
 
   // Cloud config sync — detect folder name conflicts across devices
   // All user preferences that should sync across devices
@@ -855,6 +870,7 @@ export default function App() {
             onDetail={(r) => setDetailReceipt(r)}
             config={config}
             refreshKey={receipts.length}
+            syncTrigger={syncTrigger}
             showAlert={showAlert}
           />
         )}
