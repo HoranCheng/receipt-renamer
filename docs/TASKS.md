@@ -1,7 +1,7 @@
 # TASKS.md — Receipt Renamer
 
 ## Project Status: ACTIVE
-## Current Version: v0.3.0
+## Current Version: v0.4.0
 
 ---
 
@@ -74,7 +74,13 @@
 |----|------|----------|--------|
 | T-040 | 多用户数据隔离测试 | P0 | ⏳ 需第二个测试账号 |
 | T-041 | App.jsx 拆分（God Component）| P1 | 🔲 |
-| T-042 | InboxView + processor.js 逻辑统一 | P2 | ✅ `a1cdc28` |
+| T-042 | InboxView + processor.js 逻辑统一 | P1 | ✅ `a1cdc28` |
+| T-046 | Review 字段级置信度高亮 | P2 | ✅ `31bd388` |
+| T-047 | 批量快审视图 | P2 | ✅ `31bd388` |
+| T-048 | Log 页 Sheets 数据只读语义 | P1 | ✅ `a1cdc28` |
+| T-049 | 配置同步失败 toast 提醒 | P1 | ✅ `a1cdc28` |
+| T-050 | 选"用本地"时保留云端 sheetId | P0 | ✅ `16d9c8b` |
+| T-051 | 测试修复（ai.test.js + constants）| P0 | ✅ `a1cdc28` |
 | T-043 | 上传队列持久化 + 自动恢复 | P0 | ✅ IndexedDB + auto-resume |
 | T-044 | 上传超时机制 | P1 | ✅ AbortController 60s/120s |
 | T-045 | AI 识别 prompt 防误杀 | P0 | ✅ Worker + 前端双层修复 |
