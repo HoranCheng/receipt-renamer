@@ -61,33 +61,40 @@ let _accessToken = null;
 async function uploadToDrive(task) {
   if (!_accessToken) throw new Error('No access token');
   
-  const metadata = { name: task.fileName, parents: [task.folderId] };
-  const boundary = 'rr_sw_boundary';
-  const metaPart = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(metadata)}\r\n`;
-  const mediaPart = `--${boundary}\r\nContent-Type: ${task.mimeType}\r\n\r\n`;
-  const closePart = `\r\n--${boundary}--`;
-
   // Convert base64 back to blob
   const byteStr = atob(task.base64Data);
   const bytes = new Uint8Array(byteStr.length);
   for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i);
   const fileBlob = new Blob([bytes], { type: task.mimeType });
 
-  const body = new Blob([metaPart, mediaPart, fileBlob, closePart]);
+  const metadata = { name: task.fileName, parents: [task.folderId] };
 
-  const res = await fetch(
-    `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name`,
+  // Step 1: Initiate resumable upload session
+  const initRes = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name',
     {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${_accessToken}`,
-        'Content-Type': `multipart/related; boundary=${boundary}`,
+        'Content-Type': 'application/json',
+        'X-Upload-Content-Type': task.mimeType,
+        'X-Upload-Content-Length': String(fileBlob.size),
       },
-      body,
+      body: JSON.stringify(metadata),
     }
   );
-  if (!res.ok) throw new Error(`Upload failed (${res.status})`);
-  return res.json();
+  if (!initRes.ok) throw new Error(`Upload init failed (${initRes.status})`);
+  const sessionUri = initRes.headers.get('Location');
+  if (!sessionUri) throw new Error('Upload init failed: no session URI');
+
+  // Step 2: Upload file body
+  const uploadRes = await fetch(sessionUri, {
+    method: 'PUT',
+    headers: { 'Content-Type': task.mimeType },
+    body: fileBlob,
+  });
+  if (!uploadRes.ok) throw new Error(`Upload failed (${uploadRes.status})`);
+  return uploadRes.json();
 }
 
 async function runAIRecognition(fileId, mimeType, proxyUrl, uid) {

@@ -53,8 +53,8 @@ function getNetworkLabel() {
   return effectiveType || type || '网络未知';
 }
 
-// Animated circular progress ring
-function ProgressRing({ status }) {
+// Animated circular progress ring with percentage fill
+function ProgressRing({ status, progress }) {
   const r = 11, c = 2 * Math.PI * r;
   if (status === 'done') return (
     <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'rgba(52,211,153,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -71,7 +71,20 @@ function ProgressRing({ status }) {
       <span style={{ fontSize: 13 }}>📶</span>
     </div>
   );
-  // uploading / queued → spinning ring
+  // uploading with progress → fill ring proportionally
+  if (status === 'uploading' && typeof progress === 'number' && progress > 0) {
+    const dashLen = (progress / 100) * c;
+    return (
+      <svg width={26} height={26} viewBox="0 0 26 26" style={{ flexShrink: 0, transform: 'rotate(-90deg)' }}>
+        <circle cx={13} cy={13} r={r} fill="none" stroke={T.bdr} strokeWidth={2.5} />
+        <circle cx={13} cy={13} r={r} fill="none" stroke={T.acc}
+          strokeWidth={2.5} strokeDasharray={`${dashLen} ${c}`} strokeLinecap="round"
+          style={{ transition: 'stroke-dasharray 0.3s ease' }}
+        />
+      </svg>
+    );
+  }
+  // uploading (no progress yet) / queued → spinning ring
   return (
     <svg width={26} height={26} viewBox="0 0 26 26" style={{ flexShrink: 0 }}>
       <circle cx={13} cy={13} r={r} fill="none" stroke={T.bdr} strokeWidth={2.5} />
@@ -124,9 +137,10 @@ async function compressImage(file, maxWidth = 1280, quality = 0.82) {
   });
 }
 
-function QueueItem({ item: it, onRetry }) {
+function QueueItem({ item: it, onRetry, onCancel }) {
   const [expanded, setExpanded] = useState(false);
   const isFailed = it.status === 'failed';
+  const isUploading = it.status === 'uploading';
 
   return (
     <div>
@@ -158,12 +172,45 @@ function QueueItem({ item: it, onRetry }) {
           </div>
           <div style={{ fontSize: 10, color: isFailed ? T.red : T.tx3, marginTop: 2 }}>
             {it.status === 'done' && '✅ 已上传到 Drive'}
-            {it.status === 'uploading' && `上传中${it.retries > 0 ? `（第 ${it.retries + 1} 次重试）` : '…'}`}
+            {isUploading && typeof it.progress === 'number' && it.progress > 0
+              ? `上传中 ${it.progress}%${it.retries > 0 ? `（第 ${it.retries + 1} 次重试）` : ''}`
+              : isUploading && `准备上传${it.retries > 0 ? `（第 ${it.retries + 1} 次重试）` : '…'}`}
             {it.status === 'queued' && '等待上传…'}
             {isFailed && `❌ 失败 · 点击查看详情`}
           </div>
+          {/* Progress bar for uploading items */}
+          {isUploading && typeof it.progress === 'number' && it.progress > 0 && (
+            <div style={{
+              marginTop: 4, height: 3, borderRadius: 2,
+              background: T.bdr, overflow: 'hidden',
+            }}>
+              <div style={{
+                height: '100%', borderRadius: 2,
+                background: T.acc,
+                width: `${it.progress}%`,
+                transition: 'width 0.3s ease',
+              }} />
+            </div>
+          )}
         </div>
-        <ProgressRing status={it.status} />
+        {/* Cancel button for uploading/queued items */}
+        {(isUploading || it.status === 'queued') && onCancel && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onCancel(); }}
+            style={{
+              width: 26, height: 26, borderRadius: '50%',
+              background: 'rgba(248,113,113,0.1)', border: 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', flexShrink: 0, padding: 0,
+              fontSize: 12, color: T.red,
+            }}
+            title="取消上传"
+          >✕</button>
+        )}
+        {/* Progress ring (only when not showing cancel button, or for done/failed) */}
+        {!(isUploading || it.status === 'queued') && (
+          <ProgressRing status={it.status} progress={it.progress} />
+        )}
       </div>
       {/* Expanded detail for failed items */}
       {expanded && isFailed && (
@@ -283,13 +330,23 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
     }
   }, []);
 
+  // AbortController refs for cancellable uploads
+  const abortControllersRef = useRef({}); // id → AbortController
+
   // Upload a single item — returns true if successful
   const uploadOne = useCallback(async (pending, inboxFolder) => {
-    updateItem(pending.id, { status: 'uploading' });
+    const abortController = new AbortController();
+    abortControllersRef.current[pending.id] = abortController;
+    updateItem(pending.id, { status: 'uploading', progress: 0 });
     const file = filesRef.current[pending.id] || pending.fileBlob;
     let lastError = '';
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      if (abortController.signal.aborted) {
+        updateItem(pending.id, { status: 'failed', error: '上传已取消' });
+        delete abortControllersRef.current[pending.id];
+        return false;
+      }
       try {
         const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '-' +
           Math.random().toString(36).slice(2, 5);
@@ -297,17 +354,27 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
           : (file.type || '').includes('png') ? 'png' : 'jpg';
         const fileName = `receipt_${ts}.${ext}`;
         const folderId = await findOrCreateFolder(inboxFolder);
-        const uploaded = await uploadToDriveFolder(file, fileName, folderId, file.type || 'image/jpeg');
+        const uploaded = await uploadToDriveFolder(file, fileName, folderId, file.type || 'image/jpeg', {
+          onProgress: (percent) => updateItem(pending.id, { progress: percent }),
+          signal: abortController.signal,
+        });
         if (uploaded?.id) {
           rekeyCache(pending.id, uploaded.id).catch(() => {});
           pending._uploadedFile = { id: uploaded.id, name: fileName, mimeType: file.type || 'image/jpeg' };
         }
+        delete abortControllersRef.current[pending.id];
         return true;
       } catch (err) {
+        if (err.name === 'AbortError') {
+          updateItem(pending.id, { status: 'failed', error: '上传已取消' });
+          delete abortControllersRef.current[pending.id];
+          return false;
+        }
         lastError = err.message;
         if (attempt < MAX_RETRIES - 1) {
           updateItem(pending.id, {
             retries: attempt + 1,
+            progress: 0,
             error: `网络不稳定，准备第 ${attempt + 2} 次重试…`,
           });
           await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
@@ -315,6 +382,7 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
       }
     }
     updateItem(pending.id, { status: 'failed', error: lastError });
+    delete abortControllersRef.current[pending.id];
     return false;
   }, [updateItem]);
 
@@ -455,6 +523,16 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
     queueRef.current = [...queueRef.current, ...newItems];
     if (!wifiOnly) processQueue(inboxFolder);
   }, [config, processQueue]);
+
+  const cancelOne = useCallback((id) => {
+    const controller = abortControllersRef.current[id];
+    if (controller) {
+      controller.abort();
+    } else {
+      // Not yet uploading (queued) — just mark as failed
+      updateItem(id, { status: 'failed', error: '上传已取消' });
+    }
+  }, [updateItem]);
 
   const retryAll = useCallback(async () => {
     const failed = queueRef.current.filter(it =>
@@ -694,7 +772,7 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             {items.filter(it => it.status !== 'wifi_blocked').map(it => (
-              <QueueItem key={it.id} item={it} onRetry={() => retryOne(it.id)} />
+              <QueueItem key={it.id} item={it} onRetry={() => retryOne(it.id)} onCancel={() => cancelOne(it.id)} />
             ))}
           </div>
         </div>
