@@ -496,56 +496,121 @@ export async function getFileAsBase64(fileId) {
   return btoa(binary);
 }
 
-export async function uploadToDriveFolder(blob, fileName, folderId, mimeType = 'image/jpeg') {
-  const token = await ensureToken();
+/**
+ * Upload a file to Google Drive using resumable upload.
+ *
+ * Benefits over simple multipart:
+ * - Supports upload progress tracking
+ * - Can be cancelled mid-upload via AbortController
+ * - More resilient on slow/mobile networks (chunked)
+ * - Auto-retries on 401 (token refresh)
+ *
+ * @param {Blob} blob - file to upload
+ * @param {string} fileName
+ * @param {string} folderId - Drive folder ID
+ * @param {string} mimeType
+ * @param {object} [options]
+ * @param {function} [options.onProgress] - callback(percent: 0-100)
+ * @param {AbortSignal} [options.signal] - AbortController signal for cancellation
+ * @returns {Promise<{id: string, name: string}>}
+ */
+export async function uploadToDriveFolder(blob, fileName, folderId, mimeType = 'image/jpeg', options = {}) {
+  const { onProgress, signal } = options;
 
-  const metadata = { name: fileName, parents: [folderId] };
-  const boundary = 'rr_upload_boundary';
-  const metaPart = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(metadata)}\r\n`;
-  const mediaPart = `--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`;
-  const closePart = `\r\n--${boundary}--`;
-
-  const body = new Blob([metaPart, mediaPart, blob, closePart]);
-
-  // Timeout: more forgiving on slow/mobile networks
-  const conn = (typeof navigator !== 'undefined')
-    ? (navigator.connection || navigator.mozConnection || navigator.webkitConnection)
-    : null;
-  const weakNetwork = !!conn && (
-    conn.type === 'cellular' || ['slow-2g', '2g', '3g'].includes(conn.effectiveType)
-  );
-  const timeoutMs = weakNetwork
-    ? (blob.size > 2 * 1024 * 1024 ? 180000 : 90000)
-    : (blob.size > 2 * 1024 * 1024 ? 120000 : 60000);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
+  // ── Step 1: Initiate resumable upload session ──
+  async function initSession(token) {
+    const metadata = { name: fileName, parents: [folderId] };
     const res = await fetch(
-      `${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id,name`,
+      `${DRIVE_UPLOAD_API}/files?uploadType=resumable&fields=id,name`,
       {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
-          'Content-Type': `multipart/related; boundary=${boundary}`,
+          'Content-Type': 'application/json',
+          'X-Upload-Content-Type': mimeType,
+          'X-Upload-Content-Length': String(blob.size),
         },
-        body,
-        signal: controller.signal,
+        body: JSON.stringify(metadata),
+        signal,
       }
     );
+    if (res.status === 401) return { retry401: true };
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message || `Upload failed (${res.status})`);
+      throw new Error(err.error?.message || `上传初始化失败 (${res.status})`);
     }
-    return res.json();
-  } catch (e) {
-    if (e.name === 'AbortError') {
-      throw new Error(`上传超时（${timeoutMs / 1000}秒），请检查网络后重试`);
-    }
-    throw e;
-  } finally {
-    clearTimeout(timer);
+    const sessionUri = res.headers.get('Location');
+    if (!sessionUri) throw new Error('上传初始化失败：未返回 session URI');
+    return { sessionUri };
   }
+
+  // ── Step 2: Upload the file body with progress tracking via XHR ──
+  async function uploadBody(sessionUri) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      // Wire up abort signal
+      if (signal) {
+        if (signal.aborted) {
+          reject(new DOMException('Upload cancelled', 'AbortError'));
+          return;
+        }
+        signal.addEventListener('abort', () => xhr.abort(), { once: true });
+      }
+
+      // Progress tracking
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch {
+            resolve({ id: 'unknown', name: fileName });
+          }
+        } else {
+          reject(new Error(`上传失败 (${xhr.status})`));
+        }
+      };
+      xhr.onerror = () => reject(new Error('网络错误，上传中断'));
+      xhr.ontimeout = () => reject(new Error('上传超时，请检查网络后重试'));
+      xhr.onabort = () => reject(new DOMException('上传已取消', 'AbortError'));
+
+      xhr.open('PUT', sessionUri);
+      xhr.setRequestHeader('Content-Type', mimeType);
+
+      // Timeout: generous for mobile networks
+      const conn = (typeof navigator !== 'undefined')
+        ? (navigator.connection || navigator.mozConnection || navigator.webkitConnection)
+        : null;
+      const weakNetwork = !!conn && (
+        conn.type === 'cellular' || ['slow-2g', '2g', '3g'].includes(conn.effectiveType)
+      );
+      xhr.timeout = weakNetwork
+        ? (blob.size > 2 * 1024 * 1024 ? 300000 : 120000)
+        : (blob.size > 2 * 1024 * 1024 ? 120000 : 60000);
+
+      xhr.send(blob);
+    });
+  }
+
+  // ── Execute with 401 retry ──
+  let token = await ensureToken();
+  let session = await initSession(token);
+  if (session.retry401) {
+    // Token expired — refresh and retry
+    _clearToken();
+    token = await ensureToken();
+    session = await initSession(token);
+    if (session.retry401) throw new Error('登录已过期，请重新登录');
+  }
+
+  onProgress?.(0);
+  return uploadBody(session.sessionUri);
 }
 
 export async function renameAndMoveFile(fileId, newName, targetFolderId, currentFolderId) {
@@ -835,8 +900,10 @@ export async function appendToSheet(spreadsheetId, sheetName, row) {
   const token = await ensureToken();
 
   const range = encodeURIComponent(`${sheetName}!A:F`);
+  // SECURITY: Use RAW to prevent formula injection from AI-extracted text.
+  // USER_ENTERED would execute formulas like =IMPORTRANGE() if present in receipt data.
   const res = await fetch(
-    `${SHEETS_API}/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED`,
+    `${SHEETS_API}/spreadsheets/${spreadsheetId}/values/${range}:append?valueInputOption=RAW`,
     {
       method: 'POST',
       headers: {
