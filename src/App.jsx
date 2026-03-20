@@ -163,6 +163,9 @@ export default function App() {
       // Check for pending non-receipt alerts from previous sessions (user-scoped)
       try {
         const alerts = await load('rr-non-receipt-alerts', []);
+        // Migration: clean up stale unscoped localStorage entries left by old bug
+        // (NonReceiptModal previously wrote to unscoped key directly)
+        try { localStorage.removeItem('rr-non-receipt-alerts'); } catch {}
         setNonReceiptAlerts(alerts);
         if (alerts.length > 0) setShowNonReceiptModal(true);
       } catch {

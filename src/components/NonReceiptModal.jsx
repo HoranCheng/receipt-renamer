@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { T, F } from '../constants/theme';
 import { deleteFile, getFileThumbnailUrl } from '../services/google';
+import { store } from '../services/storage';
 
 /**
  * Bottom-sheet for non-receipt alerts — redesigned with:
@@ -43,7 +44,8 @@ export default function NonReceiptModal({ alerts, onClose, onManualReview }) {
   if (!alerts.length) return null;
 
   const saveAlerts = (updated) => {
-    try { localStorage.setItem('rr-non-receipt-alerts', JSON.stringify(updated)); } catch {}
+    // Use scoped storage (same as App.jsx reads) to avoid ghost entries
+    store('rr-non-receipt-alerts', updated).catch(() => {});
     onClose(updated);
   };
 
@@ -62,7 +64,8 @@ export default function NonReceiptModal({ alerts, onClose, onManualReview }) {
 
   const handleManualReview = () => {
     const updated = alerts.filter(a => a.fileId !== item.fileId);
-    try { localStorage.setItem('rr-non-receipt-alerts', JSON.stringify(updated)); } catch {}
+    // Use scoped storage to stay consistent with App.jsx reads
+    store('rr-non-receipt-alerts', updated).catch(() => {});
     onManualReview?.(item); // parent handles navigation
   };
 
