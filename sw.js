@@ -1,4 +1,5 @@
-const CACHE_NAME = 'receipt-renamer-v2';
+const CACHE_VERSION = '3'; // BUMP on every deploy to bust SW cache
+const CACHE_NAME = `receipt-renamer-v${CACHE_VERSION}`;
 const SHELL_URLS = [
   '/',
   '/index.html',
@@ -68,33 +69,25 @@ async function uploadToDrive(task) {
   const fileBlob = new Blob([bytes], { type: task.mimeType });
 
   const metadata = { name: task.fileName, parents: [task.folderId] };
+  const boundary = 'rr_sw_boundary';
+  const metaPart = `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(metadata)}\r\n`;
+  const mediaPart = `--${boundary}\r\nContent-Type: ${task.mimeType}\r\n\r\n`;
+  const closePart = `\r\n--${boundary}--`;
+  const body = new Blob([metaPart, mediaPart, fileBlob, closePart]);
 
-  // Step 1: Initiate resumable upload session
-  const initRes = await fetch(
-    'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name',
+  const res = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name',
     {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${_accessToken}`,
-        'Content-Type': 'application/json',
-        'X-Upload-Content-Type': task.mimeType,
-        'X-Upload-Content-Length': String(fileBlob.size),
+        'Content-Type': `multipart/related; boundary=${boundary}`,
       },
-      body: JSON.stringify(metadata),
+      body,
     }
   );
-  if (!initRes.ok) throw new Error(`Upload init failed (${initRes.status})`);
-  const sessionUri = initRes.headers.get('Location');
-  if (!sessionUri) throw new Error('Upload init failed: no session URI');
-
-  // Step 2: Upload file body
-  const uploadRes = await fetch(sessionUri, {
-    method: 'PUT',
-    headers: { 'Content-Type': task.mimeType },
-    body: fileBlob,
-  });
-  if (!uploadRes.ok) throw new Error(`Upload failed (${uploadRes.status})`);
-  return uploadRes.json();
+  if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+  return res.json();
 }
 
 async function runAIRecognition(fileId, mimeType, proxyUrl, uid) {
