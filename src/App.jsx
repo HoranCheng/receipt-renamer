@@ -162,10 +162,29 @@ export default function App() {
 
       // Check for pending non-receipt alerts from previous sessions (user-scoped)
       try {
-        const alerts = await load('rr-non-receipt-alerts', []);
-        // Migration: clean up stale unscoped localStorage entries left by old bug
-        // (NonReceiptModal previously wrote to unscoped key directly)
-        try { localStorage.removeItem('rr-non-receipt-alerts'); } catch {}
+        const scopedAlerts = await load('rr-non-receipt-alerts', []);
+        // Migration: old bug wrote deletions to unscoped key while scoped key kept stale data.
+        // If unscoped key exists and has fewer items, it has the real (post-deletion) state.
+        // Merge: only keep alerts whose fileIds appear in BOTH lists (intersection),
+        // or if unscoped is gone, just use scoped as-is.
+        let alerts = scopedAlerts;
+        try {
+          const unscopedRaw = localStorage.getItem('rr-non-receipt-alerts');
+          if (unscopedRaw) {
+            const unscopedAlerts = JSON.parse(unscopedRaw);
+            if (Array.isArray(unscopedAlerts)) {
+              // Unscoped key has the deletion-updated list — use it as filter
+              const unscopedIds = new Set(unscopedAlerts.map(a => a.fileId));
+              alerts = scopedAlerts.filter(a => unscopedIds.has(a.fileId));
+              // Persist the cleaned list to scoped key
+              if (alerts.length !== scopedAlerts.length) {
+                await store('rr-non-receipt-alerts', alerts);
+              }
+            }
+            // Remove the stale unscoped key
+            localStorage.removeItem('rr-non-receipt-alerts');
+          }
+        } catch {}
         setNonReceiptAlerts(alerts);
         if (alerts.length > 0) setShowNonReceiptModal(true);
       } catch {
