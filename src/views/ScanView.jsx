@@ -334,7 +334,8 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
   const abortControllersRef = useRef({}); // id → AbortController
 
   // Upload a single item — returns true if successful
-  const uploadOne = useCallback(async (pending, inboxFolder) => {
+  // folderId is pre-resolved by processQueue to avoid redundant API calls
+  const uploadOne = useCallback(async (pending, folderId) => {
     const abortController = new AbortController();
     abortControllersRef.current[pending.id] = abortController;
     updateItem(pending.id, { status: 'uploading', progress: 0 });
@@ -353,7 +354,6 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
         const ext = (file.type || '').includes('pdf') ? 'pdf'
           : (file.type || '').includes('png') ? 'png' : 'jpg';
         const fileName = `receipt_${ts}.${ext}`;
-        const folderId = await findOrCreateFolder(inboxFolder);
         const uploaded = await uploadToDriveFolder(file, fileName, folderId, file.type || 'image/jpeg', {
           onProgress: (percent) => updateItem(pending.id, { progress: percent }),
           signal: abortController.signal,
@@ -405,6 +405,19 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
       showToast?.(`检测到 ${getNetworkLabel()}，已切换到稳妥上传模式（单张串行）`, 'warn', 2600);
     }
 
+    // Pre-resolve folder ID once (avoids redundant API calls per upload)
+    let resolvedFolderId;
+    try {
+      resolvedFolderId = await findOrCreateFolder(inboxFolder);
+    } catch (e) {
+      console.warn('Failed to resolve inbox folder:', e);
+      queueRef.current
+        .filter(it => it.status === 'queued')
+        .forEach(it => updateItem(it.id, { status: 'failed', error: '无法连接 Drive：' + e.message }));
+      processingRef.current = false;
+      return;
+    }
+
     // Process in network-adaptive batches
     while (true) {
       const batch = queueRef.current
@@ -421,7 +434,7 @@ export default function ScanView({ onUploaded, onSync, procStatus, config, onSta
       }
 
       const results = await Promise.allSettled(
-        batch.map(item => uploadOne(item, inboxFolder))
+        batch.map(item => uploadOne(item, resolvedFolderId))
       );
 
       for (let i = 0; i < batch.length; i++) {

@@ -517,31 +517,47 @@ export async function getFileAsBase64(fileId) {
 export async function uploadToDriveFolder(blob, fileName, folderId, mimeType = 'image/jpeg', options = {}) {
   const { onProgress, signal } = options;
 
-  // ── Step 1: Initiate resumable upload session ──
+  // ── Step 1: Initiate resumable upload session (with timeout) ──
   async function initSession(token) {
     const metadata = { name: fileName, parents: [folderId] };
-    const res = await fetch(
-      `${DRIVE_UPLOAD_API}/files?uploadType=resumable&fields=id,name`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'X-Upload-Content-Type': mimeType,
-          'X-Upload-Content-Length': String(blob.size),
-        },
-        body: JSON.stringify(metadata),
-        signal,
-      }
-    );
-    if (res.status === 401) return { retry401: true };
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message || `上传初始化失败 (${res.status})`);
+    // Timeout for session init — mobile networks can hang on fetch indefinitely
+    const initController = new AbortController();
+    const initTimer = setTimeout(() => initController.abort(), 30000); // 30s
+    // Combine with caller's abort signal
+    if (signal) {
+      signal.addEventListener('abort', () => initController.abort(), { once: true });
     }
-    const sessionUri = res.headers.get('Location');
-    if (!sessionUri) throw new Error('上传初始化失败：未返回 session URI');
-    return { sessionUri };
+    try {
+      const res = await fetch(
+        `${DRIVE_UPLOAD_API}/files?uploadType=resumable&fields=id,name`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'X-Upload-Content-Type': mimeType,
+            'X-Upload-Content-Length': String(blob.size),
+          },
+          body: JSON.stringify(metadata),
+          signal: initController.signal,
+        }
+      );
+      if (res.status === 401) return { retry401: true };
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || `上传初始化失败 (${res.status})`);
+      }
+      const sessionUri = res.headers.get('Location');
+      if (!sessionUri) throw new Error('上传初始化失败：未返回 session URI');
+      return { sessionUri };
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        throw new Error('上传初始化超时（30秒），请检查网络');
+      }
+      throw e;
+    } finally {
+      clearTimeout(initTimer);
+    }
   }
 
   // ── Step 2: Upload the file body with progress tracking via XHR ──
