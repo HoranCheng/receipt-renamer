@@ -520,6 +520,9 @@ export async function getFileAsBase64(fileId) {
  */
 export async function uploadToDriveFolder(blob, fileName, folderId, mimeType = 'image/jpeg', options = {}) {
   const { onProgress, signal } = options;
+  // Lazy import to avoid circular deps
+  const { dlog } = await import('./debugLog');
+  dlog('info', 'upload', `开始上传 ${fileName} (${(blob.size/1024).toFixed(0)}KB)`);
 
   async function doUpload(token) {
     const metadata = { name: fileName, parents: [folderId] };
@@ -568,9 +571,9 @@ export async function uploadToDriveFolder(blob, fileName, folderId, mimeType = '
           reject(new Error(errMsg));
         }
       };
-      xhr.onerror = () => reject(new Error('网络错误，上传中断'));
-      xhr.ontimeout = () => reject(new Error('上传超时，请检查网络后重试'));
-      xhr.onabort = () => reject(new DOMException('上传已取消', 'AbortError'));
+      xhr.onerror = () => { dlog('error', 'upload', `XHR onerror: ${fileName}`); reject(new Error('网络错误，上传中断')); };
+      xhr.ontimeout = () => { dlog('error', 'upload', `XHR timeout: ${fileName}, timeout=${xhr.timeout}ms`); reject(new Error('上传超时，请检查网络后重试')); };
+      xhr.onabort = () => { dlog('warn', 'upload', `XHR abort: ${fileName}`); reject(new DOMException('上传已取消', 'AbortError')); };
 
       xhr.open('POST', `${DRIVE_UPLOAD_API}/files?uploadType=multipart&fields=id,name`);
       xhr.setRequestHeader('Authorization', `Bearer ${token}`);

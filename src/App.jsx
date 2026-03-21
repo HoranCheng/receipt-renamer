@@ -760,9 +760,10 @@ export default function App() {
               flexShrink: 0,
             }} />
             {(() => {
-              const remaining = (procStatus.total || 0) - (procStatus.done || 0) - (procStatus.failed || 0);
+              const effectiveTotal = Math.max(procStatus.total || 0, (procStatus.done || 0) + (procStatus.failed || 0));
+              const remaining = effectiveTotal - (procStatus.done || 0) - (procStatus.failed || 0);
               const parts = [`AI 识别中`];
-              if (procStatus.total > 1) parts.push(`${procStatus.done || 0}/${procStatus.total}`);
+              if (effectiveTotal > 1) parts.push(`${procStatus.done || 0}/${effectiveTotal}`);
               if (remaining > 0) parts.push(`剩余 ${remaining} 张`);
               if (procStatus.failed > 0) parts.push(`${procStatus.failed} 失败`);
               return parts.join(' · ');

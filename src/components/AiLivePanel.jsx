@@ -47,7 +47,7 @@ export default function AiLivePanel({ procStatus, liveResults = [] }) {
           )}
           <div style={{ textAlign: 'left' }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.tx, fontFamily: F }}>
-              {isActive ? `AI 识别中 · ${done}/${total}` : `识别完成 · ${done} 张`}
+              {isActive ? `AI 识别中 · ${done}/${Math.max(done, total)}` : `识别完成 · ${done} 张`}
             </div>
             {failed > 0 && (
               <div style={{ fontSize: 11, color: T.red, marginTop: 1 }}>
