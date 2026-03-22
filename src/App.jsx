@@ -12,11 +12,10 @@ import {
   setLoginHint,
   signOut,
   getAccessToken,
-  readCloudConfig,
   saveCloudConfig,
-  renameSubFolder,
   deduplicateFolders,
 } from './services/google';
+import { syncCloudConfig, resolveConfigConflict as resolveConflict, SYNC_FIELDS } from './hooks/useCloudSync';
 import { processInboxBackground, getSavedProgress, setConfigCallback, retrySheetOutbox } from './services/processor';
 import { sendTokenToSW, onSWMessage, resumeSWProcessing, clearSWToken } from './services/swBridge';
 import { store, load, setCurrentUser, clearCurrentUserData, clearAllData } from './services/storage';
@@ -139,9 +138,9 @@ export default function App() {
               const updated = { ...mergedConfig, connected: true, googleProfile };
               setConfig(updated);
               store('rr-config', updated);
-              syncCloudConfig(updated);
+              handleSyncCloudConfig(updated);
             } else {
-              syncCloudConfig(mergedConfig);
+              handleSyncCloudConfig(mergedConfig);
             }
             deduplicateFolders();
             // Retry any failed Sheets writes from previous sessions
@@ -279,140 +278,18 @@ export default function App() {
   }, [config.setupDone, config.connected, config.sheetId]);
 
   // Cloud config sync — detect folder name conflicts across devices
-  // All user preferences that should sync across devices
-  const SYNC_FIELDS = [
-    'inboxFolder', 'validatedFolder', 'reviewFolder',
-    'sheetId', 'sheetName',
-    'compressImages', 'wifiOnlyUpload',
-  ];
-
-  const syncCloudConfig = async (localConfig) => {
-    try {
-      const cloud = await readCloudConfig();
-      const syncFields = SYNC_FIELDS;
-
-      if (!cloud) {
-        // No cloud config yet — upload current config as the source of truth
-        const toSave = {};
-        syncFields.forEach(k => { if (localConfig[k] != null) toSave[k] = localConfig[k]; });
-        toSave.updatedAt = new Date().toISOString();
-        try {
-          await saveCloudConfig(toSave);
-        } catch (e) {
-          console.warn('Initial cloud config upload failed:', e);
-          showToast('⚠️ 配置上传失败，跨设备同步可能不可用', 'warn', 4000);
-        }
-        return;
-      }
-
-      // Determine if local is "fresh" (new device / never customized)
-      // A fresh device has no sheetId and uses default folder names
-      const isLocalFresh = !localConfig.sheetId && (
-        localConfig.inboxFolder === DEFAULT_CONFIG.inboxFolder &&
-        localConfig.validatedFolder === DEFAULT_CONFIG.validatedFolder &&
-        localConfig.reviewFolder === DEFAULT_CONFIG.reviewFolder
-      );
-
-      if (isLocalFresh) {
-        // New device — cloud wins for everything, no conflict prompt
-        let updated = { ...localConfig };
-        let changed = false;
-        syncFields.forEach(k => {
-          if (cloud[k] != null) {
-            updated[k] = cloud[k];
-            changed = true;
-          }
-        });
-        // Also pull sheetId/sheetName even though they're in syncFields
-        if (cloud.sheetId) { updated.sheetId = cloud.sheetId; changed = true; }
-        if (cloud.sheetName) { updated.sheetName = cloud.sheetName; changed = true; }
-        if (changed) {
-          setConfig(updated);
-          await store('rr-config', updated);
-          console.info('Synced cloud config to new device:', updated);
-        }
-        return;
-      }
-
-      // Both sides have customized values — check for conflicts
-      const conflicts = syncFields.filter(k =>
-        cloud[k] != null && localConfig[k] != null && cloud[k] !== localConfig[k]
-      );
-
-      if (conflicts.length > 0) {
-        setConfigConflict({ cloud, local: localConfig, fields: conflicts });
-      } else {
-        // No conflict — merge (cloud wins for missing local values)
-        let updated = { ...localConfig };
-        let changed = false;
-        syncFields.forEach(k => {
-          if (cloud[k] != null && localConfig[k] == null) {
-            updated[k] = cloud[k];
-            changed = true;
-          }
-        });
-        if (changed) {
-          setConfig(updated);
-          await store('rr-config', updated);
-        }
-      }
-    } catch (e) {
-      console.warn('Cloud config sync failed:', e);
+  const handleSyncCloudConfig = async (localConfig) => {
+    const conflict = await syncCloudConfig(localConfig, { setConfig, showToast });
+    if (conflict) {
+      setConfigConflict(conflict);
     }
   };
 
   // Resolve config conflict — user picks cloud or local
   const resolveConfigConflict = async (useCloud) => {
     if (!configConflict) return;
-    const syncFields = SYNC_FIELDS;
-    const folderFields = ['inboxFolder', 'validatedFolder', 'reviewFolder'];
-    let merged = { ...config };
-
-    if (useCloud) {
-      // Use cloud values — and rename Drive folders to match
-      for (const k of syncFields) {
-        if (configConflict.cloud[k] != null) {
-          const oldVal = merged[k];
-          merged[k] = configConflict.cloud[k];
-          // Rename folder in Drive if it's a folder field and values differ
-          if (folderFields.includes(k) && oldVal && oldVal !== merged[k]) {
-            try { await renameSubFolder(oldVal, merged[k]); } catch (e) {
-              console.warn(`Failed to rename folder ${oldVal} → ${merged[k]}:`, e);
-            }
-          }
-        }
-      }
-    } else {
-      // Use local values — rename Drive folders to match local names
-      for (const k of folderFields) {
-        const cloudVal = configConflict.cloud[k];
-        const localVal = merged[k];
-        if (cloudVal && localVal && cloudVal !== localVal) {
-          try { await renameSubFolder(cloudVal, localVal); } catch (e) {
-            console.warn(`Failed to rename folder ${cloudVal} → ${localVal}:`, e);
-          }
-        }
-      }
-      // Preserve cloud-only fields that are absent locally (e.g. sheetId)
-      // This prevents losing the Sheets connection when local hasn't set it yet
-      for (const k of syncFields) {
-        if (!merged[k] && configConflict.cloud[k]) {
-          merged[k] = configConflict.cloud[k];
-        }
-      }
-    }
-    // Save merged config to both local and cloud
+    const merged = await resolveConflict(useCloud, configConflict, config, { showToast });
     setConfig(merged);
-    await store('rr-config', merged);
-    const toSave = {};
-    syncFields.forEach(k => { if (merged[k] != null) toSave[k] = merged[k]; });
-    toSave.updatedAt = new Date().toISOString();
-    try {
-      await saveCloudConfig(toSave);
-    } catch (e) {
-      console.warn('Cloud config sync after conflict resolve failed:', e);
-      showToast('⚠️ 配置同步失败，请稍后在设置中重试', 'warn', 4000);
-    }
     setConfigConflict(null);
   };
 
@@ -499,7 +376,7 @@ export default function App() {
         await store('rr-config', updated);
         setAuthLoading(false);
         // Sync cloud config after login
-        syncCloudConfig(updated);
+        handleSyncCloudConfig(updated);
         deduplicateFolders();
         navTo(newView);
         return;
