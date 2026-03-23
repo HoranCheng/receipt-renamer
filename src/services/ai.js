@@ -1,3 +1,5 @@
+import { getCachedGoogleIdToken, getGoogleIdToken } from './google';
+
 const PROXY_URL = import.meta.env.VITE_AI_PROXY_URL || '';
 
 // Max payload size for AI requests (base64 of a 10MB file is ~13.3MB)
@@ -9,10 +11,21 @@ const ALLOWED_MIME = ['image/jpeg', 'image/png', 'application/pdf'];
 
 async function analyzeViaProxy(base64, mediaType, fileType) {
   const uid = localStorage.getItem('rr-current-user') || 'anonymous';
+  let idToken = getCachedGoogleIdToken();
+  if (!idToken) {
+    try {
+      idToken = await getGoogleIdToken();
+    } catch {
+      idToken = await getGoogleIdToken({ interactive: true });
+    }
+  }
 
   const res = await fetch(`${PROXY_URL}/api/analyze`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Google-ID-Token': idToken,
+    },
     body: JSON.stringify({ uid, base64, mediaType, fileType }),
   });
 

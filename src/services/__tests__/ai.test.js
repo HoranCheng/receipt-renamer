@@ -18,22 +18,27 @@ describe('analyzeReceipt (proxy mode)', () => {
   };
 
   let analyzeReceipt;
+  let getGoogleIdToken;
 
   beforeEach(async () => {
     vi.stubGlobal('localStorage', {
       getItem: vi.fn(() => 'test-user-123'),
       setItem: vi.fn(),
     });
-    // Set proxy URL via env
     import.meta.env.VITE_AI_PROXY_URL = PROXY;
-    // Dynamic import to pick up env
     vi.resetModules();
+    getGoogleIdToken = vi.fn().mockResolvedValue('mock-google-id-token');
+    vi.doMock('../google', () => ({
+      getCachedGoogleIdToken: vi.fn(() => 'mock-google-id-token'),
+      getGoogleIdToken,
+    }));
     const mod = await import('../ai');
     analyzeReceipt = mod.analyzeReceipt;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.doUnmock('../google');
     delete import.meta.env.VITE_AI_PROXY_URL;
   });
 
@@ -53,6 +58,7 @@ describe('analyzeReceipt (proxy mode)', () => {
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe(`${PROXY}/api/analyze`);
     expect(opts.method).toBe('POST');
+    expect(opts.headers['X-Google-ID-Token']).toBe('mock-google-id-token');
     const body = JSON.parse(opts.body);
     expect(body.uid).toBe('test-user-123');
     expect(body.base64).toBe('base64data');
