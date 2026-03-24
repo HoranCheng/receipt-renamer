@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { T, F } from '../constants/theme';
+import { T, F } from '../../shared/constants/theme';
 import {
   findOrCreateFolder,
   listFilesInFolder,
@@ -10,19 +10,19 @@ import {
   getFileThumbnailUrl,
   getFileAsBlobUrl,
   getFileAsBase64,
-} from '../services/google';
-import { getCachedImageUrl, removeCachedImage } from '../services/imageCache';
-import { analyzeReceipt } from '../services/ai';
-import Header from '../components/Header';
-import Btn from '../components/Btn';
-import Field from '../components/Field';
-import CatChips from '../components/CatChips';
-import StatusDot from '../components/StatusDot';
-import { RobotWorking, RobotDone, NotReceiptBadge } from '../components/RobotScene';
-import { buildReceiptName, seedNameCounters } from '../utils/naming';
-import { store, load as storageLoad } from '../services/storage';
-import Lightbox from '../components/Lightbox';
-import { scoreFields, fieldBorder, FieldHint } from '../utils/fieldScoring.jsx';
+} from '../../services/google';
+import { getCachedImageUrl, removeCachedImage } from '../../services/imageCache';
+import { analyzeReceipt } from '../../services/ai';
+import Header from '../../shared/components/Header';
+import Btn from '../../shared/components/Btn';
+import Field from '../../shared/components/Field';
+import CatChips from '../../shared/components/CatChips';
+import StatusDot from '../../shared/components/StatusDot';
+import { RobotWorking, RobotDone, NotReceiptBadge } from '../../shared/components/RobotScene';
+import { buildReceiptName, seedNameCounters } from '../../shared/utils/naming';
+import { store, load as storageLoad } from '../../services/storage';
+import Lightbox from './components/Lightbox';
+import { scoreFields, fieldBorder, FieldHint } from './components/FieldScoring.jsx';
 
 // ─── Main ReviewView ──────────────────────────────────────────────────────────
 

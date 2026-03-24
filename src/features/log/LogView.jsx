@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { T, F, FM } from '../constants/theme';
-import { CAT_ICON, CAT_CLR } from '../constants';
-import { readSheetRecords } from '../services/google';
-import Header from '../components/Header';
-import { haptic } from '../utils/haptics';
+import { T, F, FM } from '../../shared/constants/theme';
+import { CAT_ICON, CAT_CLR } from '../../shared/constants';
+import { readSheetRecords } from '../../services/google';
+import Header from '../../shared/components/Header';
+import { haptic } from '../../shared/utils/haptics';
 
 function downloadFile(content, filename, mime) {
   const blob = new Blob([content], { type: mime });

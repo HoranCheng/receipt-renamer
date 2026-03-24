@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { T, FM } from '../constants/theme';
-import { CAT_ICON, CAT_CLR } from '../constants';
-import { getFileThumbnailUrl, getFileAsBlobUrl } from '../services/google';
-import Header from '../components/Header';
-import Field from '../components/Field';
-import Btn from '../components/Btn';
-import CatChips from '../components/CatChips';
-import StatusDot from '../components/StatusDot';
+import { T, FM } from '../../shared/constants/theme';
+import { CAT_ICON, CAT_CLR } from '../../shared/constants';
+import { getFileThumbnailUrl, getFileAsBlobUrl } from '../../services/google';
+import Header from '../../shared/components/Header';
+import Field from '../../shared/components/Field';
+import Btn from '../../shared/components/Btn';
+import CatChips from '../../shared/components/CatChips';
+import StatusDot from '../../shared/components/StatusDot';
 
 // Lightweight lightbox for receipt photo preview
 function PhotoLightbox({ src, onClose }) {

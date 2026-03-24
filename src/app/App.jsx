@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { T, F } from './constants/theme';
-import { DEFAULT_CONFIG } from './constants';
-import { AlertModal, ConfirmModal } from './components/Modal';
+import { T, F } from '../shared/constants/theme';
+import { DEFAULT_CONFIG } from '../shared/constants';
+import { AlertModal, ConfirmModal } from '../shared/components/Modal';
 import {
-  initGoogleAPI,
   nukeAllUserData,
   isGapiLoaded,
+  initGoogleAPI,
   requestAccessToken,
   fetchUserProfile,
   tryRestoreSession,
@@ -14,25 +14,26 @@ import {
   getAccessToken,
   saveCloudConfig,
   deduplicateFolders,
-} from './services/google';
-import { syncCloudConfig, resolveConfigConflict as resolveConflict, SYNC_FIELDS } from './hooks/useCloudSync';
-import { processInboxBackground, getSavedProgress, setConfigCallback, retrySheetOutbox } from './services/processor';
-import { sendTokenToSW, onSWMessage, resumeSWProcessing, clearSWToken } from './services/swBridge';
-import { store, load, setCurrentUser, clearCurrentUserData, clearAllData } from './services/storage';
+} from '../services/google';
+import { syncCloudConfig, resolveConfigConflict as resolveConflict, SYNC_FIELDS } from '../shared/hooks/useCloudSync';
+import { processInboxBackground, getSavedProgress, setConfigCallback, retrySheetOutbox } from '../services/processor';
+import { sendTokenToSW, onSWMessage, resumeSWProcessing, clearSWToken } from '../services/swBridge';
+import { store, load, setCurrentUser, clearAllData } from '../services/storage';
 import { css } from './styles';
-import Nav from './components/Nav';
-import ErrorBoundary from './components/ErrorBoundary';
-import { useToast } from './components/Toast';
-import SetupView from './views/SetupView';
-import DashView from './views/DashView';
-import { RobotWorking } from './components/RobotScene';
-import NonReceiptModal from './components/NonReceiptModal';
-import InboxView from './views/InboxView';
-import ScanView from './views/ScanView';
-import ReviewView from './views/ReviewView';
-import LogView from './views/LogView';
-import ConfigView from './views/ConfigView';
-import DetailView from './views/DetailView';
+import Nav from '../shared/components/Nav';
+import ErrorBoundary from '../shared/components/ErrorBoundary';
+import { useToast } from '../shared/components/Toast';
+import SetupView from '../features/config/SetupView';
+import DashView from '../features/dashboard/DashView';
+import { RobotWorking } from '../shared/components/RobotScene';
+import NonReceiptModal from '../shared/components/NonReceiptModal';
+import InboxView from '../features/inbox/InboxView';
+import ScanView from '../features/scan/ScanView';
+import ReviewView from '../features/review/ReviewView';
+import LogView from '../features/log/LogView';
+import ConfigView from '../features/config/ConfigView';
+import DetailView from '../features/log/DetailView';
+import useAuth from '../features/auth/hooks/useAuth';
 
 const BUILT_IN_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 
@@ -53,7 +54,6 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [detailReceipt, setDetailReceipt] = useState(null);
   const [procStatus, setProcStatus] = useState(null); // { processing, current, total, done, failed }
-  const [authLoading, setAuthLoading] = useState(false);
   const [reviewCount, setReviewCount] = useState(0); // T-014: badge for review tab
   const [configConflict, setConfigConflict] = useState(null); // { cloud, local, fields[] }
   const [liveResults, setLiveResults] = useState([]); // Live AI recognition results for current batch
@@ -65,6 +65,9 @@ export default function App() {
   const showAlert = useCallback((title, message, danger = false) => setAlertModal({ open: true, title, message, danger }), []);
   const showConfirm = useCallback((title, message, onConfirm, danger = false) => setConfirmModal({ open: true, title, message, danger, onConfirm }), []);
   const { showToast, ToastContainer } = useToast();
+
+  // Auth hook
+  const { authLoading, setAuthLoading } = useAuth(config, setConfig, showAlert);
 
   // Let processor notify us when it auto-creates a sheet
   useEffect(() => {

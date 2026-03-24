@@ -1,5 +1,5 @@
-import { readCloudConfig, saveCloudConfig, renameSubFolder } from '../services/google';
-import { store } from '../services/storage';
+import { readCloudConfig, saveCloudConfig, renameSubFolder } from '../../services/google';
+import { store } from '../../services/storage';
 import { DEFAULT_CONFIG } from '../constants';
 
 // ─── Cloud config sync ────────────────────────────────────────────────────────

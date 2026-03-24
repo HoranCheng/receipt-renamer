@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { T, F } from '../constants/theme';
-import Header from '../components/Header';
-import Btn from '../components/Btn';
-import StatusDot from '../components/StatusDot';
-import { createReceiptSheet, renameSubFolder } from '../services/google';
+import { T, F } from '../../shared/constants/theme';
+import Header from '../../shared/components/Header';
+import Btn from '../../shared/components/Btn';
+import StatusDot from '../../shared/components/StatusDot';
+import { createReceiptSheet, renameSubFolder } from '../../services/google';
 
 // ─── Nuclear Delete: double-confirm + double 5-second wait ───────────────────
 

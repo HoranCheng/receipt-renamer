@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { T } from '../constants/theme';
-import { initGoogleAPI, requestAccessToken, createReceiptSheet } from '../services/google';
-import Field from '../components/Field';
-import Btn from '../components/Btn';
-import StatusDot from '../components/StatusDot';
+import { T } from '../../shared/constants/theme';
+import { initGoogleAPI, requestAccessToken, createReceiptSheet } from '../../services/google';
+import Field from '../../shared/components/Field';
+import Btn from '../../shared/components/Btn';
+import StatusDot from '../../shared/components/StatusDot';
 
 const BUILT_IN_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
 

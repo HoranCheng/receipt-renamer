@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { T, F } from '../constants/theme';
-import { deleteFile, getFileThumbnailUrl } from '../services/google';
-import { store } from '../services/storage';
+import { deleteFile, getFileThumbnailUrl } from '../../services/google';
+import { store } from '../../services/storage';
 
 /**
  * Bottom-sheet for non-receipt alerts — redesigned with:

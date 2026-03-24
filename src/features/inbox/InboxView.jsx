@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { T } from '../constants/theme';
+import { T } from '../../shared/constants/theme';
 import {
   findOrCreateFolder,
   listFilesInFolder,
-} from '../services/google';
-import { processSingleFile } from '../services/processor';
-import { seedNameCounters } from '../utils/naming';
-import Header from '../components/Header';
-import Btn from '../components/Btn';
+} from '../../services/google';
+import { processSingleFile } from '../../services/processor';
+import { seedNameCounters } from '../../shared/utils/naming';
+import Header from '../../shared/components/Header';
+import Btn from '../../shared/components/Btn';
 
 export default function InboxView({ config, onProcessed, showAlert }) {
   const [files, setFiles] = useState([]);
