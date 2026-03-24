@@ -11,6 +11,8 @@ export {
   fetchUserProfile,
   ensureToken,
   setLoginHint,
+  getCachedGoogleIdToken,
+  getGoogleIdToken,
   getToken,
   _clearToken,
   driveReq,

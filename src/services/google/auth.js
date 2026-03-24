@@ -1,9 +1,12 @@
 import { SCOPES } from '../../constants';
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
+const ID_TOKEN_SESSION_KEY = 'rr-google-id-token';
+const ID_TOKEN_PERSIST_KEY = 'rr-google-id-token-persistent';
 
 let gapiLoaded = false;
 let tokenClient = null;
+let googleClientId = '';
 
 // ─── Script loader ────────────────────────────────────────────────────────────
 
@@ -31,6 +34,7 @@ export async function initGoogleAPI(clientId) {
   });
   await window.gapi.client.init({});
   gapiLoaded = true;
+  googleClientId = clientId || '';
 
   tokenClient = window.google.accounts.oauth2.initTokenClient({
     client_id: clientId,
@@ -91,6 +95,50 @@ export function clearSession() {
   } catch {}
 }
 
+function parseJwtPayload(token) {
+  try {
+    const base64Url = token.split('.')[1];
+    if (!base64Url) return null;
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const json = decodeURIComponent(atob(base64).split('').map((c) => `%${c.charCodeAt(0).toString(16).padStart(2, '0')}`).join(''));
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function isFreshIdToken(token) {
+  const payload = parseJwtPayload(token);
+  if (!payload?.exp) return false;
+  return (payload.exp * 1000) > (Date.now() + 60_000);
+}
+
+function saveIdToken(token, persistent = false) {
+  if (!token) return;
+  try {
+    sessionStorage.setItem(ID_TOKEN_SESSION_KEY, token);
+    if (persistent) localStorage.setItem(ID_TOKEN_PERSIST_KEY, token);
+    else localStorage.removeItem(ID_TOKEN_PERSIST_KEY);
+  } catch {}
+}
+
+function loadIdToken() {
+  try {
+    const token = sessionStorage.getItem(ID_TOKEN_SESSION_KEY) || localStorage.getItem(ID_TOKEN_PERSIST_KEY);
+    if (!token || !isFreshIdToken(token)) return '';
+    return token;
+  } catch {
+    return '';
+  }
+}
+
+function clearIdToken() {
+  try {
+    sessionStorage.removeItem(ID_TOKEN_SESSION_KEY);
+    localStorage.removeItem(ID_TOKEN_PERSIST_KEY);
+  } catch {}
+}
+
 export function signOut() {
   const token = window.gapi?.client?.getToken();
   if (token?.access_token) {
@@ -98,9 +146,11 @@ export function signOut() {
     window.gapi.client.setToken(null);
   }
   clearSession();
+  clearIdToken();
   // clearFolderCache is imported by callers that need it
   gapiLoaded = false;
   tokenClient = null;
+  googleClientId = '';
 }
 
 export function requestAccessToken(options = {}) {
@@ -156,6 +206,55 @@ export async function ensureToken() {
 
 let _loginHint = '';
 export function setLoginHint(email) { _loginHint = email || ''; }
+
+export function getCachedGoogleIdToken() {
+  return loadIdToken();
+}
+
+export async function getGoogleIdToken({ interactive = false, persistent = false } = {}) {
+  const cached = loadIdToken();
+  if (cached) return cached;
+
+  if (!googleClientId || !window.google?.accounts?.id) {
+    throw new Error('Google 身份验证未初始化');
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      fn(value);
+    };
+
+    const timeout = setTimeout(() => {
+      finish(reject, new Error('无法获取 Google 身份令牌，请重新登录'));
+    }, interactive ? 15000 : 5000);
+
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      auto_select: true,
+      use_fedcm_for_prompt: true,
+      cancel_on_tap_outside: false,
+      callback: (resp) => {
+        if (!resp?.credential) {
+          finish(reject, new Error('Google 未返回身份令牌'));
+          return;
+        }
+        saveIdToken(resp.credential, persistent);
+        finish(resolve, resp.credential);
+      },
+    });
+
+    window.google.accounts.id.prompt((notification) => {
+      if (settled) return;
+      if (notification.isNotDisplayed?.() || notification.isSkippedMoment?.()) {
+        finish(reject, new Error('无法获取 Google 身份令牌，请重新登录'));
+      }
+    });
+  });
+}
 
 export async function driveReq(method, path, { params, body, responseType } = {}) {
   const token = await ensureToken();

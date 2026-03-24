@@ -49,8 +49,9 @@ export const CAT_CLR = {
   Other: '#64748b',
 };
 
+// SECURITY: use drive.file (only files created/opened by this app) instead of full drive access
 export const SCOPES =
-  'openid email profile https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
+  'openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
 
 export const DISCOVERY_DOCS = [
   'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest',
