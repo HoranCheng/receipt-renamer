@@ -1,4 +1,4 @@
-import { SCOPES } from '../../constants';
+import { SCOPES } from '../../shared/constants';
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 const ID_TOKEN_SESSION_KEY = 'rr-google-id-token';

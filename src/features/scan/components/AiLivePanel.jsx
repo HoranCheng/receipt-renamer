@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { T, F } from '../constants/theme';
-import { CAT_ICON, CAT_CLR } from '../constants';
+import { T, F } from '../../../shared/constants/theme';
+import { CAT_ICON, CAT_CLR } from '../../../shared/constants';
 
 /**
  * Expandable panel showing live AI recognition results.

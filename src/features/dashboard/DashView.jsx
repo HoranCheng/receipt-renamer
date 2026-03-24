@@ -1,8 +1,8 @@
-import { T, F, FM } from '../constants/theme';
-import { CAT_ICON, CAT_CLR } from '../constants';
-import Btn from '../components/Btn';
-import StatusDot from '../components/StatusDot';
-import ReceiptRow from '../components/ReceiptRow';
+import { T, F, FM } from '../../shared/constants/theme';
+import { CAT_ICON, CAT_CLR } from '../../shared/constants';
+import Btn from '../../shared/components/Btn';
+import StatusDot from '../../shared/components/StatusDot';
+import ReceiptRow from '../../shared/components/ReceiptRow';
 
 export default function DashView({ receipts, onNav }) {
   const total = receipts.reduce((s, r) => s + parseFloat(r.amount || 0), 0);

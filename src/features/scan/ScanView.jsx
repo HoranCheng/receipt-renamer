@@ -1,8 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { T, F } from '../constants/theme';
-import { findOrCreateFolder, uploadToDriveFolder } from '../services/google';
-import Header from '../components/Header';
-import AiLivePanel from '../components/AiLivePanel';
+import { T, F } from '../../shared/constants/theme';
+import { findOrCreateFolder, uploadToDriveFolder } from '../../services/google';
+import Header from '../../shared/components/Header';
+import AiLivePanel from './components/AiLivePanel';
 import {
   createThumbnail,
   savePending,
@@ -14,10 +14,10 @@ import {
   WARN_BYTES,
   CRIT_BYTES,
   STALE_DAYS,
-} from '../services/pendingQueue';
-import { cacheImage, rekeyCache } from '../services/imageCache';
-import { enqueueFile } from '../services/processor';
-import { enqueueToSW, isSWAvailable, sendTokenToSW } from '../services/swBridge';
+} from '../../services/pendingQueue';
+import { cacheImage, rekeyCache } from '../../services/imageCache';
+import { enqueueFile } from '../../services/processor';
+import { enqueueToSW, isSWAvailable, sendTokenToSW } from '../../services/swBridge';
 import {
   getConnection,
   isWifi,
@@ -28,7 +28,7 @@ import {
   MAX_FILE_SIZE,
   ALLOWED_TYPES,
   compressImage,
-} from '../services/uploader';
+} from '../../services/uploader';
 
 // Animated circular progress ring with percentage fill
 function ProgressRing({ status, progress }) {

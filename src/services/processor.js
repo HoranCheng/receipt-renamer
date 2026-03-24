@@ -15,7 +15,7 @@ import {
 import { analyzeReceipt } from './ai';
 import { removeCachedImage } from './imageCache';
 import { store, load } from './storage';
-import { buildReceiptName, resetNameCounters, seedNameCounters } from '../utils/naming';
+import { buildReceiptName, resetNameCounters, seedNameCounters } from '../shared/utils/naming';
 
 // Callback to update config from processor (e.g. when auto-creating sheet)
 let _configCallback = null;
